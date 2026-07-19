@@ -1,0 +1,13 @@
+.git
+.cursor
+.vscode
+node_modules
+target
+dist
+data
+uploads
+coverage
+*.log
+.env*
+!*.env.example
+native
