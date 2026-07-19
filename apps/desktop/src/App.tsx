@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { LibrarySnapshot, PlaybackProfile, Sound, Soundboard, loadLibrary, moveItem } from "./library";
+import { shortcutFromKeyboardEvent, shortcutLabel, useGlobalShortcuts } from "./shortcuts";
 
 type Page = "library" | "audio";
 type Microphone = { id: string; name: string; isDefault: boolean };
@@ -84,21 +85,44 @@ type SoundCardProps = {
   onImage: (sound: Sound) => void;
   onDelete: (sound: Sound) => void;
   onMove: (from: number, to: number) => void;
-  onProfile: (sound: Sound, profile: PlaybackProfile) => void;
+  onProfile: (sound: Sound, profile: PlaybackProfile, preview: boolean) => void;
+  shortcutOwner: (shortcut: string, soundId: string) => string | null;
 };
 
 const replayLabels = { overlap: "Superposer", toggle: "Pause ou reprendre", stop: "Arrêter", restart: "Recommencer" } as const;
 
-function SoundCard({ sound, index, total, busy, playing, progress, paused, onPlay, onRename, onImage, onDelete, onMove, onProfile }: SoundCardProps) {
+function SoundCard({ sound, index, total, busy, playing, progress, paused, onPlay, onRename, onImage, onDelete, onMove, onProfile, shortcutOwner }: SoundCardProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [capturingShortcut, setCapturingShortcut] = useState(false);
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
   const [draft, setDraft] = useState(sound.playback);
   useEffect(() => setDraft(sound.playback), [sound.playback]);
   useEffect(() => {
     if (!settingsOpen || draft === sound.playback) return;
-    const timer = window.setTimeout(() => onProfile(sound, draft), 400);
+    const preview = draft.volume !== sound.playback.volume
+      || draft.pitchSemitones !== sound.playback.pitchSemitones
+      || draft.speed !== sound.playback.speed
+      || draft.replayPolicy !== sound.playback.replayPolicy;
+    const timer = window.setTimeout(() => onProfile(sound, draft, preview), 400);
     return () => window.clearTimeout(timer);
   }, [draft, settingsOpen, sound, onProfile]);
   const updateDraft = (next: Partial<PlaybackProfile>) => setDraft((current) => ({ ...current, ...next }));
+  const captureShortcut = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!capturingShortcut) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.code === "Escape") { setCapturingShortcut(false); setShortcutError(null); return; }
+    if (event.code === "Backspace" || event.code === "Delete") {
+      updateDraft({ keybind: null }); setCapturingShortcut(false); setShortcutError(null); return;
+    }
+    const shortcut = shortcutFromKeyboardEvent(event.nativeEvent);
+    if (!shortcut) { setShortcutError("Utilisez au moins Ctrl, Alt, Maj ou Windows avec une touche prise en charge."); return; }
+    const owner = shortcutOwner(shortcut, sound.id);
+    if (owner) { setShortcutError(`Ce raccourci est déjà utilisé par « ${owner} ».`); return; }
+    updateDraft({ keybind: shortcut });
+    setCapturingShortcut(false);
+    setShortcutError(null);
+  };
   return (
     <article className="sound-card">
       <button className="sound-trigger" type="button" onClick={() => onPlay(sound)} disabled={busy} aria-label={`Jouer ${sound.title}`}>
@@ -123,6 +147,8 @@ function SoundCard({ sound, index, total, busy, playing, progress, paused, onPla
         <label>Hauteur <output>{draft.pitchSemitones > 0 ? "+" : ""}{draft.pitchSemitones} demi-ton{Math.abs(draft.pitchSemitones) > 1 ? "s" : ""}</output><input type="range" min="-12" max="12" step="1" value={draft.pitchSemitones} onChange={(event) => updateDraft({ pitchSemitones: Number(event.target.value) })} /></label>
         <label>Vitesse <output>{draft.speed.toFixed(2)}×</output><input type="range" min="0.5" max="2" step="0.05" value={draft.speed} onChange={(event) => updateDraft({ speed: Number(event.target.value) })} /></label>
         <label>Au second appui<select value={draft.replayPolicy} onChange={(event) => updateDraft({ replayPolicy: event.target.value as PlaybackProfile["replayPolicy"] })}>{Object.entries(replayLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <div className="shortcut-setting"><span>Raccourci global</span><kbd>{capturingShortcut ? "Appuyez sur les touches…" : shortcutLabel(draft.keybind)}</kbd><div><button type="button" className="shortcut-capture" onClick={() => { setCapturingShortcut(true); setShortcutError(null); }} onKeyDown={captureShortcut}>{capturingShortcut ? "Écoute…" : "Définir"}</button>{draft.keybind && <button type="button" onClick={() => updateDraft({ keybind: null })}>Effacer</button>}</div></div>
+        {shortcutError && <p className="settings-error" role="alert">{shortcutError}</p>}
         <p className="settings-hint" role="status">Les changements sont enregistrés et joués automatiquement.</p>
       </div>}
     </article>
@@ -137,6 +163,8 @@ function LibraryPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [playing, setPlaying] = useState<{ id: string; totalFrames: number; progress: number; paused: boolean } | null>(null);
+  const reportShortcutError = useCallback((message: string) => setError(message), []);
+  useGlobalShortcuts(snapshot.soundboards, reportShortcutError);
 
   const refresh = useCallback(async (preferredId?: string) => {
     const next = await loadLibrary();
@@ -241,15 +269,23 @@ function LibraryPage() {
     }
   }
 
-  const updateProfile = useCallback(async (sound: Sound, profile: PlaybackProfile) => {
+  const updateProfile = useCallback(async (sound: Sound, profile: PlaybackProfile, preview: boolean) => {
     setError(null);
     try {
       await invoke("update_playback_profile", { soundId: sound.id, profile });
       setSnapshot((current) => ({ ...current, soundboards: current.soundboards.map((board) => ({ ...board, sounds: board.sounds.map((item) => item.id === sound.id ? { ...item, playback: profile } : item) })) }));
-      const totalFrames = await invoke<number>("play_sound", { soundId: sound.id });
-      setPlaying({ id: sound.id, totalFrames, progress: 0, paused: false });
+      if (preview) {
+        const totalFrames = await invoke<number>("play_sound", { soundId: sound.id });
+        setPlaying({ id: sound.id, totalFrames, progress: 0, paused: false });
+      }
     } catch (reason) { setError(String(reason)); }
   }, []);
+
+  const shortcutOwner = useCallback((shortcut: string, soundId: string) => {
+    const owner = snapshot.soundboards.flatMap((board) => board.sounds)
+      .find((sound) => sound.id !== soundId && sound.playback.keybind?.toLowerCase() === shortcut.toLowerCase());
+    return owner?.title ?? null;
+  }, [snapshot.soundboards]);
 
   async function stopPlayback() {
     try { await invoke("stop_all_sounds"); setPlaying(null); }
@@ -288,7 +324,7 @@ function LibraryPage() {
         {error && <p className="error-message" role="alert">{error}</p>}
         {selected && selected.sounds.length > 0 ? (
           <div className="sound-grid">
-            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} playing={playing?.id === sound.id} progress={playing?.id === sound.id ? playing.progress : 0} paused={playing?.id === sound.id ? playing.paused : false} onPlay={playSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} onProfile={updateProfile} />)}
+            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} playing={playing?.id === sound.id} progress={playing?.id === sound.id ? playing.progress : 0} paused={playing?.id === sound.id ? playing.paused : false} onPlay={playSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} onProfile={updateProfile} shortcutOwner={shortcutOwner} />)}
           </div>
         ) : (
           <div className="empty-state"><div className="empty-icon" aria-hidden="true">♪</div><h2>Votre soundboard est vide</h2><p>Ajoutez vos premiers sons pour les retrouver ici.</p><button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>Choisir des sons</button></div>

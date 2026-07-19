@@ -390,6 +390,7 @@ pub fn run() {
             engine: Mutex::new(None),
         })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let root = app.path().app_data_dir()?;

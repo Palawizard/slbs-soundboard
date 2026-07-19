@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
+import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: vi.fn(), unregister: vi.fn() }));
 
 const sound = {
   id: "sound-1", title: "Cloche", audioHash: "abc", audioExtension: "wav",
@@ -16,6 +18,10 @@ const sound = {
 describe("library interface", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
+    vi.mocked(register).mockReset();
+    vi.mocked(unregister).mockReset();
+    vi.mocked(register).mockResolvedValue();
+    vi.mocked(unregister).mockResolvedValue();
     vi.mocked(invoke).mockImplementation(async (command) => {
       if (command === "library_snapshot") return { soundboards: [{ id: "board-1", title: "Favoris", position: 0, sounds: [sound] }], recoveryNotice: null, activeSoundboardId: "board-1" };
       if (command === "play_sound") return 60_000;
@@ -38,5 +44,19 @@ describe("library interface", () => {
     fireEvent.change(field, { target: { value: "Jeux" } });
     fireEvent.click(screen.getByRole("button", { name: "Créer le soundboard" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("create_soundboard", { title: "Jeux" }));
+  });
+
+  it("registers a persisted global shortcut and plays its sound on press", async () => {
+    const boundSound = { ...sound, playback: { ...sound.playback, keybind: "Ctrl+Shift+K" } };
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "library_snapshot") return { soundboards: [{ id: "board-1", title: "Favoris", position: 0, sounds: [boundSound] }], recoveryNotice: null, activeSoundboardId: "board-1" };
+      if (command === "play_sound") return 60_000;
+      return undefined;
+    });
+    render(<App />);
+    await waitFor(() => expect(register).toHaveBeenCalledWith(["Ctrl+Shift+K"], expect.any(Function)));
+    const handler = vi.mocked(register).mock.calls[0][1];
+    handler({ shortcut: "Ctrl+Shift+K", id: 1, state: "Pressed" });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("play_sound", { soundId: "sound-1" }));
   });
 });

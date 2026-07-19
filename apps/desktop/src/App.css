@@ -66,6 +66,12 @@ h2 { font-size: 1.35rem; }
 .sound-settings output { color: #9e91f4; font-variant-numeric: tabular-nums; }
 .sound-settings input { grid-column: 1 / -1; width: 100%; accent-color: #826cff; }
 .sound-settings select { grid-column: 1 / -1; margin-top: 2px; padding: 8px 9px; font-size: .78rem; }
+.shortcut-setting { display: grid; gap: 7px; color: #c4c9d7; font-size: .76rem; font-weight: 650; }
+.shortcut-setting kbd { overflow: hidden; padding: 8px 9px; border: 1px solid #3a4052; border-radius: 7px; color: #dcd8ff; background: #171c28; font: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.shortcut-setting > div { display: flex; gap: 7px; }
+.shortcut-setting button { padding: 6px 9px; border: 1px solid #3a4052; border-radius: 7px; color: #d5d9e5; background: #202534; cursor: pointer; font-size: .72rem; }
+.shortcut-setting .shortcut-capture { border-color: #6252ba; background: #312968; }
+.settings-error { margin: 0; color: #ff9eae; font-size: .7rem; line-height: 1.4; }
 .settings-hint { margin: 0; color: #777f91; font-size: .7rem; line-height: 1.4; }
 .empty-state { display: grid; justify-items: center; max-width: 520px; margin: 100px auto 0; padding: 54px 36px; border: 1px dashed #393f51; border-radius: 24px; color: #aeb4c5; text-align: center; background: rgb(20 23 33 / 62%); }
 .empty-state h2 { color: #fff; }

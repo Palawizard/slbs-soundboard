@@ -259,6 +259,19 @@ impl LibraryRepository {
         profile: &PlaybackProfile,
     ) -> Result<(), LibraryError> {
         validate_playback_profile(profile)?;
+        if let Some(keybind) = profile.keybind.as_deref() {
+            let owner = self
+                .connection
+                .query_row(
+                    "SELECT id FROM sounds WHERE keybind = ?1 AND id <> ?2",
+                    params![keybind, id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if owner.is_some() {
+                return Err(LibraryError::KeybindConflict);
+            }
+        }
         require_changed(self.connection.execute(
             "UPDATE sounds SET volume = ?1, pitch_semitones = ?2, speed = ?3, replay_policy = ?4, keybind = ?5 WHERE id = ?6",
             params![profile.volume, profile.pitch_semitones, profile.speed, profile.replay_policy.as_str(), profile.keybind, id],
@@ -443,10 +456,13 @@ fn validate_playback_profile(profile: &PlaybackProfile) -> Result<(), LibraryErr
         || !(0.0..=2.0).contains(&profile.volume)
         || !(-12.0..=12.0).contains(&profile.pitch_semitones)
         || !(0.5..=2.0).contains(&profile.speed)
-        || profile
-            .keybind
-            .as_ref()
-            .is_some_and(|value| value.trim().is_empty())
+        || profile.keybind.as_ref().is_some_and(|value| {
+            value.trim().is_empty()
+                || value.len() > 80
+                || !value.is_ascii()
+                || value.chars().any(|character| character.is_ascii_whitespace())
+                || !value.contains('+')
+        })
     {
         Err(LibraryError::InvalidPlaybackProfile)
     } else {
@@ -580,7 +596,7 @@ mod tests {
                     pitch_semitones: 3.0,
                     speed: 1.25,
                     replay_policy: ReplayPolicy::Overlap,
-                    keybind: Some("Control+Shift+KeyA".to_owned()),
+                    keybind: Some("Ctrl+Shift+A".to_owned()),
                 },
             )
             .unwrap();

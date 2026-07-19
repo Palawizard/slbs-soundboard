@@ -37,4 +37,6 @@ pub enum LibraryError {
     AudioDecode,
     #[error("Les réglages de lecture ne sont pas valides.")]
     InvalidPlaybackProfile,
+    #[error("Ce raccourci est déjà associé à un autre son.")]
+    KeybindConflict,
 }
