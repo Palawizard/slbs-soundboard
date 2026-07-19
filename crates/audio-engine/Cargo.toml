@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+crossbeam-queue = "0.3"
 thiserror = "2"
 
 [target.'cfg(windows)'.dependencies]
@@ -18,4 +19,3 @@ windows = { version = "0.61", features = [
   "Win32_System_Variant",
   "Win32_UI_Shell_PropertiesSystem",
 ] }
-
