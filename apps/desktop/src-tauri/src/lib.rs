@@ -1,16 +1,17 @@
+use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
 use base64::Engine as _;
 use serde::Serialize;
 use slb_audio_engine::{
-    AudioEngine, DeviceCatalog, EngineState, EngineStatus, MixBus, MixerCommand,
-    SystemDeviceCatalog,
+    AudioEngine, DeviceCatalog, EngineState, EngineStatus, MixBus, MixerCommand, PlaybackId,
+    ReplayPolicy as EngineReplayPolicy, SystemDeviceCatalog,
 };
 use tauri::{Manager, State};
 
 mod library;
 
-use library::{LibraryService, PlaybackProfile, Sound, Soundboard};
+use library::{LibraryService, PlaybackProfile, ReplayPolicy, Sound, Soundboard};
 
 struct AudioAppState {
     engine: Mutex<Option<AudioEngine>>,
@@ -52,6 +53,8 @@ struct AudioStatusDto {
     underrun_frames: u64,
     playback_frames: u64,
     playback_total_frames: u64,
+    playback_paused: bool,
+    active_voices: usize,
 }
 
 impl AudioStatusDto {
@@ -70,6 +73,8 @@ impl AudioStatusDto {
             underrun_frames: 0,
             playback_frames: 0,
             playback_total_frames: 0,
+            playback_paused: false,
+            active_voices: 0,
         }
     }
 }
@@ -103,6 +108,8 @@ impl From<EngineStatus> for AudioStatusDto {
             underrun_frames: ipc.underrun_frames,
             playback_frames: status.playback_frames,
             playback_total_frames: status.playback_total_frames,
+            playback_paused: status.playback_paused,
+            active_voices: status.active_voices,
         }
     }
 }
@@ -332,9 +339,7 @@ fn play_sound(
     library_state: State<'_, LibraryAppState>,
     audio_state: State<'_, AudioAppState>,
 ) -> Result<u64, String> {
-    let samples = with_library(library_state, |service| {
-        service.decode_sound(&sound_id)?.into_engine_samples()
-    })?;
+    let (sound, samples) = with_library(library_state, |service| service.prepare_sound(&sound_id))?;
     let total_frames = (samples.len() / slb_audio_engine::CHANNELS as usize) as u64;
     let mut slot = audio_state
         .engine
@@ -345,9 +350,25 @@ fn play_sound(
     }
     slot.as_ref()
         .expect("audio engine was initialized")
-        .play_sound(std::sync::Arc::from(samples.into_boxed_slice()))
+        .trigger_sound(
+            playback_id(&sound.id),
+            std::sync::Arc::from(samples.into_boxed_slice()),
+            sound.playback.volume,
+            match sound.playback.replay_policy {
+                ReplayPolicy::Overlap => EngineReplayPolicy::Overlap,
+                ReplayPolicy::Toggle => EngineReplayPolicy::Toggle,
+                ReplayPolicy::Stop => EngineReplayPolicy::Stop,
+                ReplayPolicy::Restart => EngineReplayPolicy::Restart,
+            },
+        )
         .map_err(|error| error.to_string())?;
     Ok(total_frames)
+}
+
+fn playback_id(sound_id: &str) -> PlaybackId {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    sound_id.hash(&mut hasher);
+    PlaybackId(hasher.finish())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

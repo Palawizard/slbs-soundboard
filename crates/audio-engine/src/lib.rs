@@ -4,6 +4,7 @@ mod dsp;
 mod engine;
 mod ipc;
 mod mixer;
+mod playback;
 mod quality;
 mod resampler;
 
@@ -21,6 +22,7 @@ pub use ipc::{
     SAMPLE_RATE, SharedRingWriter,
 };
 pub use mixer::{MixBus, MixStats, MixerCommand, RealtimeMixer};
+pub use playback::{PlaybackId, ReplayPolicy};
 pub use quality::{AudioQualityReport, run_reference_quality_probe};
 pub use resampler::{ResampleError, ResampleResult, WindowedSincResampler};
 

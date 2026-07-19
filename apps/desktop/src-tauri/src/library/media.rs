@@ -44,10 +44,6 @@ pub struct DecodedAudio {
 }
 
 impl DecodedAudio {
-    pub fn into_engine_samples(self) -> Result<Vec<f32>, LibraryError> {
-        self.into_engine_samples_with_profile(0.0, 1.0)
-    }
-
     pub fn into_engine_samples_with_profile(
         self,
         pitch_semitones: f32,
@@ -471,7 +467,7 @@ mod tests {
             sample_rate: 8_000,
             channels: 1,
         };
-        let output = input.into_engine_samples().unwrap();
+        let output = input.into_engine_samples_with_profile(0.0, 1.0).unwrap();
         assert!(output.len() >= 47_000 * 2);
         assert!(output.len() <= 49_000 * 2);
         assert!(output.chunks_exact(2).all(|frame| frame[0] == frame[1]));

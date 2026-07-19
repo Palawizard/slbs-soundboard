@@ -6,8 +6,8 @@ mod service;
 use std::io;
 
 pub use db::{LibraryRepository, NewSound};
-pub use media::{DecodedAudio, MediaStore};
-pub use models::{MediaAsset, PlaybackProfile, Sound, Soundboard};
+pub use media::MediaStore;
+pub use models::{MediaAsset, PlaybackProfile, ReplayPolicy, Sound, Soundboard};
 pub use service::LibraryService;
 use thiserror::Error;
 
