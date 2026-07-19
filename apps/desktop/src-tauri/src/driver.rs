@@ -137,54 +137,55 @@ fn install(package: &Path) -> Result<(), String> {
         .join("SlbVirtualAudio.inf")
         .canonicalize()
         .map_err(|_| "INF absent".to_owned())?;
-    let class_guid = GUID::from_u128(0x4d36e96c_e325_11ce_bfc1_08002be10318);
-    let mut device = SP_DEVINFO_DATA {
-        cbSize: size_of::<SP_DEVINFO_DATA>() as u32,
-        ..Default::default()
-    };
-    let info = unsafe { SetupDiCreateDeviceInfoList(Some(&class_guid), None) }
-        .map_err(|error| error.to_string())?;
-    let result = (|| {
-        unsafe {
-            SetupDiCreateDeviceInfoW(
-                info,
-                w!("SLB Virtual Microphone"),
-                &class_guid,
-                PCWSTR::null(),
-                None,
-                DICD_GENERATE_ID,
-                Some(&mut device),
-            )
-        }
-        .map_err(|error| error.to_string())?;
-        let hardware: Vec<u16> = format!("{HARDWARE_ID}\0\0").encode_utf16().collect();
-        let bytes = unsafe {
-            std::slice::from_raw_parts(hardware.as_ptr().cast::<u8>(), hardware.len() * 2)
+    if !installed() {
+        let class_guid = GUID::from_u128(0x4d36e96c_e325_11ce_bfc1_08002be10318);
+        let mut device = SP_DEVINFO_DATA {
+            cbSize: size_of::<SP_DEVINFO_DATA>() as u32,
+            ..Default::default()
         };
-        unsafe {
-            SetupDiSetDeviceRegistryPropertyW(info, &mut device, SPDRP_HARDWAREID, Some(bytes))
-        }
-        .map_err(|error| error.to_string())?;
-        unsafe { SetupDiCallClassInstaller(DIF_REGISTERDEVICE, info, Some(&device)) }
+        let info = unsafe { SetupDiCreateDeviceInfoList(Some(&class_guid), None) }
             .map_err(|error| error.to_string())?;
-        let inf: Vec<u16> = inf.as_os_str().encode_wide().chain(Some(0)).collect();
-        let mut reboot = BOOL::default();
+        let creation = (|| {
+            unsafe {
+                SetupDiCreateDeviceInfoW(
+                    info,
+                    w!("SLB Virtual Microphone"),
+                    &class_guid,
+                    PCWSTR::null(),
+                    None,
+                    DICD_GENERATE_ID,
+                    Some(&mut device),
+                )
+            }
+            .map_err(|error| error.to_string())?;
+            let hardware: Vec<u16> = format!("{HARDWARE_ID}\0\0").encode_utf16().collect();
+            let bytes = unsafe {
+                std::slice::from_raw_parts(hardware.as_ptr().cast::<u8>(), hardware.len() * 2)
+            };
+            unsafe {
+                SetupDiSetDeviceRegistryPropertyW(info, &mut device, SPDRP_HARDWAREID, Some(bytes))
+            }
+            .map_err(|error| error.to_string())?;
+            unsafe { SetupDiCallClassInstaller(DIF_REGISTERDEVICE, info, Some(&device)) }
+                .map_err(|error| error.to_string())
+        })();
         unsafe {
-            UpdateDriverForPlugAndPlayDevicesW(
-                None,
-                w!("ROOT\\SLBVirtualMicrophone"),
-                PCWSTR(inf.as_ptr()),
-                INSTALLFLAG_FORCE,
-                Some(&mut reboot),
-            )
+            let _ = SetupDiDestroyDeviceInfoList(info);
         }
-        .map_err(|error| error.to_string())?;
-        Ok(())
-    })();
-    unsafe {
-        let _ = SetupDiDestroyDeviceInfoList(info);
+        creation?;
     }
-    result
+    let inf: Vec<u16> = inf.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut reboot = BOOL::default();
+    unsafe {
+        UpdateDriverForPlugAndPlayDevicesW(
+            None,
+            w!("ROOT\\SLBVirtualMicrophone"),
+            PCWSTR(inf.as_ptr()),
+            INSTALLFLAG_FORCE,
+            Some(&mut reboot),
+        )
+    }
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(windows)]
