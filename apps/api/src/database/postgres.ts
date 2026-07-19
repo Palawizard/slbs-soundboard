@@ -122,20 +122,38 @@ export class PostgresCommunityRepository implements CommunityRepository {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [userId]);
       const asset = await client.query<DatabaseRow>(
         `INSERT INTO media_assets(id, kind, sha256, mime_type, extension, byte_size, duration_ms, width, height, storage_key)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          ON CONFLICT (kind, sha256) DO UPDATE SET sha256 = EXCLUDED.sha256 RETURNING *`,
         [randomUUID(), metadata.kind, metadata.hash, metadata.mimeType, metadata.extension, metadata.byteSize, metadata.durationMs, metadata.width, metadata.height, metadata.storageKey],
       );
+      const assetRow = required(asset.rows[0]);
+      const existing = await client.query<DatabaseRow>(
+        `${ownedMediaSelect} WHERE um.user_id = $1 AND um.asset_id = $2`,
+        [userId, assetRow.id],
+      );
+      if (existing.rows[0]?.deleted_at == null && existing.rows[0]) {
+        await client.query("COMMIT");
+        return mapOwnedMedia(existing.rows[0]);
+      }
+      const usage = await client.query<{ bytes: string; count: string }>(
+        `SELECT COALESCE(sum(a.byte_size), 0)::text AS bytes, count(*)::text AS count
+         FROM user_media um JOIN media_assets a ON a.id = um.asset_id
+         WHERE um.user_id = $1 AND um.deleted_at IS NULL`, [userId],
+      );
+      if (Number(usage.rows[0]?.count ?? 0) >= 500 || Number(usage.rows[0]?.bytes ?? 0) + metadata.byteSize > 500 * 1024 * 1024) {
+        throw new DomainError("quota", "L’espace de stockage du compte est épuisé.");
+      }
       const owned = await client.query<DatabaseRow>(
         `INSERT INTO user_media(id, user_id, asset_id) VALUES ($1,$2,$3)
          ON CONFLICT (user_id, asset_id) DO UPDATE SET deleted_at = NULL
          RETURNING id, user_id, created_at`,
-        [randomUUID(), userId, required(asset.rows[0]).id],
+        [randomUUID(), userId, assetRow.id],
       );
       await client.query("COMMIT");
-      return mapOwnedMedia({ ...required(asset.rows[0]), ...required(owned.rows[0]), asset_id: required(asset.rows[0]).id });
+      return mapOwnedMedia({ ...assetRow, ...required(owned.rows[0]), asset_id: assetRow.id });
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
 
@@ -149,14 +167,21 @@ export class PostgresCommunityRepository implements CommunityRepository {
   }
 
   async createPublication(userId: string, input: { title: string; description: string; audioMediaId: string; imageMediaId: string | null }): Promise<PublicationRecord> {
-    if (!(await this.findOwnedMedia(userId, input.audioMediaId, "audio"))) throw new DomainError("forbidden", "Ce fichier audio ne vous appartient pas.");
-    if (input.imageMediaId && !(await this.findOwnedMedia(userId, input.imageMediaId, "image"))) throw new DomainError("forbidden", "Cette image ne vous appartient pas.");
-    const id = randomUUID();
-    await this.pool.query(
-      `INSERT INTO publications(id, owner_id, audio_media_id, image_media_id, title, description)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [id, userId, input.audioMediaId, input.imageMediaId, input.title, input.description],
-    );
+    const client = await this.pool.connect(); const id = randomUUID();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [userId]);
+      const count = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM publications WHERE owner_id = $1 AND status = 'active'", [userId]);
+      if (Number(count.rows[0]?.count ?? 0) >= 100) throw new DomainError("quota", "Le nombre maximal de publications est atteint.");
+      const audio = await client.query("SELECT 1 FROM user_media um JOIN media_assets a ON a.id = um.asset_id WHERE um.id = $1 AND um.user_id = $2 AND um.deleted_at IS NULL AND a.kind = 'audio'", [input.audioMediaId, userId]);
+      if (audio.rowCount !== 1) throw new DomainError("forbidden", "Ce fichier audio ne vous appartient pas.");
+      if (input.imageMediaId) {
+        const image = await client.query("SELECT 1 FROM user_media um JOIN media_assets a ON a.id = um.asset_id WHERE um.id = $1 AND um.user_id = $2 AND um.deleted_at IS NULL AND a.kind = 'image'", [input.imageMediaId, userId]);
+        if (image.rowCount !== 1) throw new DomainError("forbidden", "Cette image ne vous appartient pas.");
+      }
+      await client.query(`INSERT INTO publications(id, owner_id, audio_media_id, image_media_id, title, description) VALUES ($1,$2,$3,$4,$5,$6)`, [id, userId, input.audioMediaId, input.imageMediaId, input.title, input.description]);
+      await client.query("COMMIT");
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
     return required(await this.findPublication(id, true));
   }
 
@@ -217,10 +242,15 @@ export class PostgresCommunityRepository implements CommunityRepository {
     return { authTransactions: auth.rowCount ?? 0, sessions: sessions.rowCount ?? 0 };
   }
 
+  async referencedStorageKeys(): Promise<Set<string>> {
+    const result = await this.pool.query<{ storage_key: string }>("SELECT storage_key FROM media_assets");
+    return new Set(result.rows.map((row) => row.storage_key));
+  }
+
   async close(): Promise<void> { await this.pool.end(); }
 }
 
-const ownedMediaSelect = `SELECT um.id, um.user_id, um.asset_id, um.created_at,
+const ownedMediaSelect = `SELECT um.id, um.user_id, um.asset_id, um.created_at, um.deleted_at,
   a.kind, a.sha256, a.mime_type, a.extension, a.byte_size, a.duration_ms, a.width, a.height, a.storage_key
   FROM user_media um JOIN media_assets a ON a.id = um.asset_id`;
 

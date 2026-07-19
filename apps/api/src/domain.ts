@@ -87,6 +87,7 @@ export interface CommunityRepository {
   publicationCount(userId: string): Promise<number>;
   writeAudit(event: AuditEvent): Promise<void>;
   cleanupExpired(before: Date): Promise<{ authTransactions: number; sessions: number }>;
+  referencedStorageKeys(): Promise<Set<string>>;
   close(): Promise<void>;
 }
 

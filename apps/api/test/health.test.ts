@@ -9,7 +9,7 @@ function dependencies(databaseReady: boolean): ServerDependencies {
   const config: ApiConfig = {
     environment: "test", host: "127.0.0.1", port: 3000, databaseUrl: "postgres://test",
     mediaRoot: "data", publicBaseUrl: "https://community.example.test", googleClientId: "google",
-    sessionSecret: "s".repeat(32), ffprobePath: "ffprobe", trustProxy: false,
+    sessionSecret: "s".repeat(32), ffprobePath: "ffprobe", ffmpegPath: "ffmpeg", trustProxy: false,
   };
   return {
     config,

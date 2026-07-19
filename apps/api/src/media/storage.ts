@@ -9,6 +9,7 @@ export interface ObjectStorage {
   resolve(storageKey: string): string;
   removeQuarantine(path: string): Promise<void>;
   cleanupQuarantine(olderThan: Date): Promise<number>;
+  cleanupOrphans(referencedKeys: Set<string>, olderThan: Date): Promise<number>;
 }
 
 export class LocalObjectStorage implements ObjectStorage {
@@ -67,6 +68,27 @@ export class LocalObjectStorage implements ObjectStorage {
       if ((await stat(path)).mtime < olderThan) {
         await this.removeQuarantine(path);
         removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  async cleanupOrphans(referencedKeys: Set<string>, olderThan: Date): Promise<number> {
+    let removed = 0;
+    for (const kind of ["audio", "image"]) {
+      const kindRoot = join(this.objectRoot, kind);
+      let prefixes;
+      try { prefixes = await readdir(kindRoot, { withFileTypes: true }); } catch { continue; }
+      for (const prefix of prefixes) {
+        if (!prefix.isDirectory()) continue;
+        const prefixRoot = join(kindRoot, prefix.name);
+        for (const entry of await readdir(prefixRoot, { withFileTypes: true })) {
+          if (!entry.isFile()) continue;
+          const key = `${kind}/${prefix.name}/${entry.name}`; const path = join(prefixRoot, entry.name);
+          if (!referencedKeys.has(key) && (await stat(path)).mtime < olderThan) {
+            await unlink(path); removed += 1;
+          }
+        }
       }
     }
     return removed;

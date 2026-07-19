@@ -12,6 +12,7 @@ const environmentSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   SESSION_SECRET: z.string().min(32),
   FFMPEG_PROBE_PATH: z.string().min(1).default("ffprobe"),
+  FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
   TRUST_PROXY: z.enum(["true", "false"]).default("false"),
   ADMIN_TOKEN: z.string().min(32).optional(),
 });
@@ -27,6 +28,7 @@ export type ApiConfig = {
   googleClientSecret?: string;
   sessionSecret: string;
   ffprobePath: string;
+  ffmpegPath: string;
   trustProxy: boolean;
   adminToken?: string;
 };
@@ -44,6 +46,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     ...(parsed.GOOGLE_CLIENT_SECRET ? { googleClientSecret: parsed.GOOGLE_CLIENT_SECRET } : {}),
     sessionSecret: parsed.SESSION_SECRET,
     ffprobePath: parsed.FFMPEG_PROBE_PATH,
+    ffmpegPath: parsed.FFMPEG_PATH,
     trustProxy: parsed.TRUST_PROXY === "true",
     ...(parsed.ADMIN_TOKEN ? { adminToken: parsed.ADMIN_TOKEN } : {}),
   };

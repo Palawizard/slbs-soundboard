@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -34,5 +34,19 @@ describe("quarantine media storage", () => {
     expect(await readFile(storage.resolve(key), "utf8")).toBe("data");
     expect(() => storage.resolve("../../secret")).toThrow();
     expect(await readdir(join(root, "quarantine"))).toHaveLength(0);
+  });
+
+  it("removes only old object files absent from the repository", async () => {
+    const root = await mkdtemp(join(tmpdir(), "slb-media-")); roots.push(root);
+    const storage = new LocalObjectStorage(root); await storage.initialize();
+    const old = new Date("2020-01-01T00:00:00Z");
+    const retainedHash = "b".repeat(64); const orphanHash = "c".repeat(64);
+    for (const [hash, contents] of [[retainedHash, "keep"], [orphanHash, "remove"]] as const) {
+      const source = storage.quarantinePath(); await streamToFile(Readable.from([Buffer.from(contents)]), source, 10);
+      const key = `image/${hash.slice(0, 2)}/${hash}.png`; await storage.promote(source, key); await utimes(storage.resolve(key), old, old);
+    }
+    const removed = await storage.cleanupOrphans(new Set([`image/bb/${retainedHash}.png`]), new Date("2021-01-01T00:00:00Z"));
+    expect(removed).toBe(1);
+    expect(await readFile(storage.resolve(`image/bb/${retainedHash}.png`), "utf8")).toBe("keep");
   });
 });
