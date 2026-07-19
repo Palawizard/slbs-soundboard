@@ -54,6 +54,10 @@ h2 { font-size: 1.35rem; }
 .sound-copy { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 12px 4px 6px; }
 .sound-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sound-copy span { color: #8d94a6; font-size: .75rem; }
+.waveform { position: relative; height: 22px; margin: 0 4px 8px; overflow: hidden; }
+.waveform svg { display: block; width: 100%; height: 100%; fill: #52596d; }
+.waveform-played { position: absolute; inset: 0 auto 0 0; overflow: hidden; transition: width .12s linear; }
+.waveform-played svg { width: calc(100% / var(--progress)); max-width: none; fill: #9d8cff; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px 0 0; border-top: 1px solid #2b3040; }
 .card-actions .delete-action:hover { color: #ffb4c2; background: #3f222d; }
 .empty-state { display: grid; justify-items: center; max-width: 520px; margin: 100px auto 0; padding: 54px 36px; border: 1px dashed #393f51; border-radius: 24px; color: #aeb4c5; text-align: center; background: rgb(20 23 33 / 62%); }

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use image::ImageReader;
 use sha2::{Digest, Sha256};
+use slb_audio_engine::{WindowedSincResampler, CHANNELS, SAMPLE_RATE};
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
@@ -30,6 +31,7 @@ pub struct AudioImport {
     pub sample_rate: u32,
     pub channels: u16,
     pub suggested_title: String,
+    pub waveform: Vec<f32>,
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +39,51 @@ pub struct DecodedAudio {
     pub samples: Vec<f32>,
     pub sample_rate: u32,
     pub channels: u16,
+}
+
+impl DecodedAudio {
+    pub fn into_engine_samples(self) -> Result<Vec<f32>, LibraryError> {
+        let channels = self.channels as usize;
+        let input_frames = self.samples.len() / channels;
+        let mut stereo = Vec::with_capacity(input_frames * CHANNELS as usize);
+        for frame in self.samples.chunks_exact(channels) {
+            stereo.push(frame[0]);
+            stereo.push(if channels == 1 { frame[0] } else { frame[1] });
+        }
+        if self.sample_rate == SAMPLE_RATE {
+            return Ok(stereo);
+        }
+
+        const CHUNK_FRAMES: usize = 4_096;
+        let mut resampler = WindowedSincResampler::new(
+            self.sample_rate,
+            SAMPLE_RATE,
+            CHANNELS as usize,
+            CHUNK_FRAMES,
+        )
+        .map_err(|_| LibraryError::AudioDecode)?;
+        let expected_frames =
+            (input_frames as u64 * SAMPLE_RATE as u64).div_ceil(self.sample_rate as u64) as usize;
+        let mut result = Vec::with_capacity((expected_frames + 64) * CHANNELS as usize);
+        let output_frames = ((CHUNK_FRAMES as u64 * SAMPLE_RATE as u64)
+            .div_ceil(self.sample_rate as u64) as usize)
+            + 64;
+        let mut output = vec![0.0; output_frames * CHANNELS as usize];
+        for chunk in stereo.chunks(CHUNK_FRAMES * CHANNELS as usize) {
+            let written = resampler
+                .process(chunk, &mut output)
+                .map_err(|_| LibraryError::AudioDecode)?
+                .output_frames_written;
+            result.extend_from_slice(&output[..written * CHANNELS as usize]);
+        }
+        let silence = [0.0_f32; 64 * CHANNELS as usize];
+        let written = resampler
+            .process(&silence, &mut output)
+            .map_err(|_| LibraryError::AudioDecode)?
+            .output_frames_written;
+        result.extend_from_slice(&output[..written * CHANNELS as usize]);
+        Ok(result)
+    }
 }
 
 impl MediaStore {
@@ -48,7 +95,7 @@ impl MediaStore {
 
     pub fn import_audio(&self, source: &Path) -> Result<AudioImport, LibraryError> {
         require_regular_file(source, MAX_AUDIO_BYTES)?;
-        let decoded = decode_audio(source, false)?;
+        let decoded = decode_audio(source, true)?;
         let duration_ms = decoded.duration_ms;
         if duration_ms == 0 || duration_ms > MAX_AUDIO_MILLISECONDS {
             return Err(LibraryError::AudioTooLong);
@@ -68,6 +115,7 @@ impl MediaStore {
             sample_rate: decoded.sample_rate,
             channels: decoded.channels,
             suggested_title: file_stem(source, "Nouveau son"),
+            waveform: waveform_peaks(&decoded.samples, decoded.channels as usize, 48),
         })
     }
 
@@ -300,6 +348,23 @@ fn file_stem(path: &Path, fallback: &str) -> String {
         .collect()
 }
 
+fn waveform_peaks(samples: &[f32], channels: usize, bins: usize) -> Vec<f32> {
+    let frames = samples.len() / channels;
+    if frames == 0 || bins == 0 {
+        return Vec::new();
+    }
+    (0..bins)
+        .map(|bin| {
+            let start = bin * frames / bins;
+            let end = ((bin + 1) * frames / bins).max(start + 1).min(frames);
+            samples[start * channels..end * channels]
+                .iter()
+                .fold(0.0_f32, |value, sample| value.max(sample.abs()))
+                .clamp(0.04, 1.0)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +401,7 @@ mod tests {
         assert_eq!(imported.sample_rate, 8_000);
         assert_eq!(imported.channels, 1);
         assert_eq!(imported.suggested_title, "cloche");
+        assert_eq!(imported.waveform.len(), 48);
         assert!(store
             .asset_path("audio", &imported.asset.hash, "wav")
             .is_file());
@@ -359,5 +425,18 @@ mod tests {
             store.import_audio(&fake),
             Err(LibraryError::UnsupportedAudio)
         ));
+    }
+
+    #[test]
+    fn converts_decoded_audio_to_engine_format() {
+        let input = DecodedAudio {
+            samples: vec![0.5; 8_000],
+            sample_rate: 8_000,
+            channels: 1,
+        };
+        let output = input.into_engine_samples().unwrap();
+        assert!(output.len() >= 47_000 * 2);
+        assert!(output.len() <= 49_000 * 2);
+        assert!(output.chunks_exact(2).all(|frame| frame[0] == frame[1]));
     }
 }

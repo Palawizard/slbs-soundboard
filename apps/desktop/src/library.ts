@@ -10,6 +10,7 @@ export type Sound = {
   channels: number;
   imageHash: string | null;
   imageExtension: string | null;
+  waveform: number[];
   createdAtMs: number;
 };
 

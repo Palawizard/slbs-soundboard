@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { LibrarySnapshot, Sound, Soundboard, loadLibrary, moveItem } from "./library";
 
@@ -18,12 +18,15 @@ type AudioStatus = {
   queuedFrames: number;
   overrunFrames: number;
   underrunFrames: number;
+  playbackFrames: number;
+  playbackTotalFrames: number;
 };
 
 const stoppedStatus: AudioStatus = {
   state: "stopped", deviceId: null, inputSampleRate: null, inputChannels: null,
   restartCount: 0, lastError: null, peak: 0, clippedSamples: 0, queuedFrames: 0,
   overrunFrames: 0, underrunFrames: 0,
+  playbackFrames: 0, playbackTotalFrames: 0,
 };
 const statusLabels: Record<AudioStatus["state"], string> = {
   starting: "Démarrage", running: "Actif", recovering: "Reconnexion", stopped: "Arrêté",
@@ -55,11 +58,23 @@ function SoundArtwork({ sound }: { sound: Sound }) {
   return <div className="sound-artwork fallback-artwork" style={fallbackColors(sound.audioHash)} aria-hidden="true">{sound.title.slice(0, 2).toUpperCase()}</div>;
 }
 
+function Waveform({ peaks, progress }: { peaks: number[]; progress: number }) {
+  const values = peaks.length > 0 ? peaks : Array.from({ length: 32 }, (_, index) => 0.18 + ((index * 17) % 7) / 12);
+  const bars = values.map((peak, index) => {
+    const height = Math.max(2, peak * 18);
+    return <rect key={index} x={index * 3} y={(20 - height) / 2} width="1.6" height={height} rx="0.8" />;
+  });
+  const playedStyle = { width: `${Math.round(progress * 100)}%`, "--progress": Math.max(progress, 0.001) } as CSSProperties;
+  return <div className="waveform" aria-hidden="true"><svg viewBox={`0 0 ${values.length * 3} 20`} preserveAspectRatio="none">{bars}</svg><div className="waveform-played" style={playedStyle}><svg viewBox={`0 0 ${values.length * 3} 20`} preserveAspectRatio="none">{bars}</svg></div></div>;
+}
+
 type SoundCardProps = {
   sound: Sound;
   index: number;
   total: number;
   busy: boolean;
+  playing: boolean;
+  progress: number;
   onPlay: (sound: Sound) => void;
   onRename: (sound: Sound) => void;
   onImage: (sound: Sound) => void;
@@ -67,7 +82,7 @@ type SoundCardProps = {
   onMove: (from: number, to: number) => void;
 };
 
-function SoundCard({ sound, index, total, busy, onPlay, onRename, onImage, onDelete, onMove }: SoundCardProps) {
+function SoundCard({ sound, index, total, busy, playing, progress, onPlay, onRename, onImage, onDelete, onMove }: SoundCardProps) {
   return (
     <article className="sound-card">
       <button className="sound-trigger" type="button" onClick={() => onPlay(sound)} disabled={busy} aria-label={`Jouer ${sound.title}`}>
@@ -78,6 +93,7 @@ function SoundCard({ sound, index, total, busy, onPlay, onRename, onImage, onDel
         <strong title={sound.title}>{sound.title}</strong>
         <span>{formatDuration(sound.durationMs)}</span>
       </div>
+      <Waveform peaks={sound.waveform} progress={playing ? progress : 0} />
       <div className="card-actions" aria-label={`Actions pour ${sound.title}`}>
         <button type="button" onClick={() => onMove(index, index - 1)} disabled={busy || index === 0} title="Déplacer avant">←</button>
         <button type="button" onClick={() => onMove(index, index + 1)} disabled={busy || index === total - 1} title="Déplacer après">→</button>
@@ -96,6 +112,7 @@ function LibraryPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<{ id: string; totalFrames: number; progress: number } | null>(null);
 
   const refresh = useCallback(async (preferredId?: string) => {
     const next = await loadLibrary();
@@ -108,6 +125,18 @@ function LibraryPage() {
   }, []);
 
   useEffect(() => { void refresh().catch((reason: unknown) => setError(String(reason))); }, [refresh]);
+  useEffect(() => {
+    if (!playing) return;
+    const timer = window.setInterval(() => {
+      void invoke<AudioStatus>("audio_status").then((status) => {
+        if (status.playbackTotalFrames !== playing.totalFrames) return;
+        const progress = Math.min(1, status.playbackFrames / Math.max(1, playing.totalFrames));
+        if (progress >= 1) setPlaying(null);
+        else setPlaying((current) => current?.id === playing.id ? { ...current, progress } : current);
+      }).catch((reason: unknown) => { setError(String(reason)); setPlaying(null); });
+    }, 120);
+    return () => window.clearInterval(timer);
+  }, [playing?.id, playing?.totalFrames]);
   const selected = useMemo(() => snapshot.soundboards.find((board) => board.id === selectedId) ?? snapshot.soundboards[0], [snapshot.soundboards, selectedId]);
 
   async function run(action: () => Promise<unknown>, success?: string, preferredId?: string) {
@@ -174,7 +203,13 @@ function LibraryPage() {
   }
 
   async function playSound(sound: Sound) {
-    await run(() => invoke("play_sound", { soundId: sound.id }), undefined, selected?.id);
+    setError(null);
+    try {
+      const totalFrames = await invoke<number>("play_sound", { soundId: sound.id });
+      setPlaying({ id: sound.id, totalFrames, progress: 0 });
+    } catch (reason) {
+      setError(String(reason));
+    }
   }
 
   return (
@@ -209,7 +244,7 @@ function LibraryPage() {
         {error && <p className="error-message" role="alert">{error}</p>}
         {selected && selected.sounds.length > 0 ? (
           <div className="sound-grid">
-            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} onPlay={playSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} />)}
+            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} playing={playing?.id === sound.id} progress={playing?.id === sound.id ? playing.progress : 0} onPlay={playSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} />)}
           </div>
         ) : (
           <div className="empty-state"><div className="empty-icon" aria-hidden="true">♪</div><h2>Votre soundboard est vide</h2><p>Ajoutez vos premiers sons pour les retrouver ici.</p><button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>Choisir des sons</button></div>

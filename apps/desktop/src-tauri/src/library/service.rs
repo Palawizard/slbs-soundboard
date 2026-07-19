@@ -91,6 +91,7 @@ impl LibraryService {
                 duration_ms: imported.duration_ms,
                 sample_rate: imported.sample_rate,
                 channels: imported.channels,
+                waveform: &imported.waveform,
             },
         )?;
         self.backup()?;

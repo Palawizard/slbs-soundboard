@@ -7,7 +7,8 @@ use uuid::Uuid;
 use super::models::{MediaAsset, Sound, Soundboard};
 use super::LibraryError;
 
-const MIGRATIONS: &[&str] = &[r#"
+const MIGRATIONS: &[&str] = &[
+    r#"
     CREATE TABLE media_assets (
         hash TEXT PRIMARY KEY,
         kind TEXT NOT NULL CHECK (kind IN ('audio', 'image')),
@@ -49,7 +50,11 @@ const MIGRATIONS: &[&str] = &[r#"
 
     CREATE INDEX sounds_audio_hash_idx ON sounds(audio_hash);
     CREATE INDEX sounds_image_hash_idx ON sounds(image_hash);
-    "#];
+    "#,
+    r#"
+    ALTER TABLE sounds ADD COLUMN waveform_json TEXT NOT NULL DEFAULT '[]';
+    "#,
+];
 
 pub struct LibraryRepository {
     connection: Connection,
@@ -62,6 +67,7 @@ pub struct NewSound<'a> {
     pub duration_ms: u64,
     pub sample_rate: u32,
     pub channels: u16,
+    pub waveform: &'a [f32],
 }
 
 impl LibraryRepository {
@@ -220,8 +226,8 @@ impl LibraryRepository {
         let id = Uuid::new_v4().to_string();
         let created_at_ms = now_ms();
         transaction.execute(
-            "INSERT INTO sounds(id, title, audio_hash, duration_ms, sample_rate, channels, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, title, sound.audio_hash, sound.duration_ms, sound.sample_rate, sound.channels, created_at_ms],
+            "INSERT INTO sounds(id, title, audio_hash, duration_ms, sample_rate, channels, waveform_json, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, title, sound.audio_hash, sound.duration_ms, sound.sample_rate, sound.channels, serde_json::to_string(sound.waveform).map_err(|_| LibraryError::AudioDecode)?, created_at_ms],
         )?;
         transaction.execute(
             "INSERT INTO soundboard_sounds(soundboard_id, sound_id, position) VALUES (?1, ?2, ?3)",
@@ -354,7 +360,7 @@ impl LibraryRepository {
 
     fn list_sounds(&self, soundboard_id: &str) -> Result<Vec<Sound>, LibraryError> {
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.created_at_ms
+            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.created_at_ms
              FROM soundboard_sounds ss
              JOIN sounds s ON s.id = ss.sound_id
              JOIN media_assets audio ON audio.hash = s.audio_hash
@@ -369,7 +375,7 @@ impl LibraryRepository {
 
     fn sound_by_id(&self, sound_id: &str) -> Result<Option<Sound>, LibraryError> {
         Ok(self.connection.query_row(
-            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.created_at_ms
+            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.created_at_ms
              FROM sounds s JOIN media_assets audio ON audio.hash = s.audio_hash
              LEFT JOIN media_assets image ON image.hash = s.image_hash WHERE s.id = ?1",
             [sound_id], map_sound,
@@ -388,7 +394,8 @@ fn map_sound(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sound> {
         channels: row.get(6)?,
         image_hash: row.get(7)?,
         image_extension: row.get(8)?,
-        created_at_ms: row.get(9)?,
+        waveform: serde_json::from_str(&row.get::<_, String>(9)?).unwrap_or_default(),
+        created_at_ms: row.get(10)?,
     })
 }
 
@@ -512,6 +519,7 @@ mod tests {
                     duration_ms: 500,
                     sample_rate: 48_000,
                     channels: 2,
+                    waveform: &[0.2, 0.8],
                 },
             )
             .unwrap();

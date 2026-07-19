@@ -12,6 +12,7 @@ pub struct Sound {
     pub channels: u16,
     pub image_hash: Option<String>,
     pub image_extension: Option<String>,
+    pub waveform: Vec<f32>,
     pub created_at_ms: u64,
 }
 

@@ -49,6 +49,8 @@ struct AudioStatusDto {
     queued_frames: u64,
     overrun_frames: u64,
     underrun_frames: u64,
+    playback_frames: u64,
+    playback_total_frames: u64,
 }
 
 impl AudioStatusDto {
@@ -65,6 +67,8 @@ impl AudioStatusDto {
             queued_frames: 0,
             overrun_frames: 0,
             underrun_frames: 0,
+            playback_frames: 0,
+            playback_total_frames: 0,
         }
     }
 }
@@ -96,6 +100,8 @@ impl From<EngineStatus> for AudioStatusDto {
             queued_frames: ipc.queued_frames,
             overrun_frames: ipc.overrun_frames,
             underrun_frames: ipc.underrun_frames,
+            playback_frames: status.playback_frames,
+            playback_total_frames: status.playback_total_frames,
         }
     }
 }
@@ -302,6 +308,30 @@ fn sound_image_data(hash: String, state: State<'_, LibraryAppState>) -> Result<S
     })
 }
 
+#[tauri::command]
+fn play_sound(
+    sound_id: String,
+    library_state: State<'_, LibraryAppState>,
+    audio_state: State<'_, AudioAppState>,
+) -> Result<u64, String> {
+    let samples = with_library(library_state, |service| {
+        service.decode_sound(&sound_id)?.into_engine_samples()
+    })?;
+    let total_frames = (samples.len() / slb_audio_engine::CHANNELS as usize) as u64;
+    let mut slot = audio_state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
+    if slot.is_none() {
+        *slot = Some(AudioEngine::start(None).map_err(|error| error.to_string())?);
+    }
+    slot.as_ref()
+        .expect("audio engine was initialized")
+        .play_sound(std::sync::Arc::from(samples.into_boxed_slice()))
+        .map_err(|error| error.to_string())?;
+    Ok(total_frames)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -335,6 +365,7 @@ pub fn run() {
             delete_sound,
             reorder_sounds,
             sound_image_data,
+            play_sound,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

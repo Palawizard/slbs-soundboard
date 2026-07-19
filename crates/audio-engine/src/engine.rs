@@ -35,6 +35,8 @@ pub struct EngineStatus {
     pub last_error: Option<String>,
     pub mix: MixStats,
     pub ipc: Option<IpcHealth>,
+    pub playback_frames: u64,
+    pub playback_total_frames: u64,
 }
 
 impl EngineStatus {
@@ -48,6 +50,8 @@ impl EngineStatus {
             last_error: None,
             mix: MixStats::default(),
             ipc: None,
+            playback_frames: 0,
+            playback_total_frames: 0,
         }
     }
 }
@@ -66,6 +70,8 @@ pub enum EngineError {
     ThreadStart,
     #[error("audio engine thread panicked")]
     ThreadPanicked,
+    #[error("sound buffer must contain complete stereo frames")]
+    InvalidSoundBuffer,
 }
 
 impl From<QueueFull> for EngineError {
@@ -74,13 +80,16 @@ impl From<QueueFull> for EngineError {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum EngineCommand {
     PlayReferenceTone,
+    PlaySound(Arc<[f32]>),
+    StopSound,
 }
 
 pub struct AudioEngine {
     engine_commands: CommandSender<EngineCommand>,
+    retired_sounds: CommandReceiver<Arc<[f32]>>,
     mixer_commands: CommandSender<MixerCommand>,
     status: Arc<Mutex<EngineStatus>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
@@ -90,6 +99,7 @@ pub struct AudioEngine {
 impl AudioEngine {
     pub fn start(device_id: Option<String>) -> Result<Self, EngineError> {
         let (engine_commands, engine_receiver) = bounded_command_queue(COMMAND_CAPACITY);
+        let (retired_sender, retired_sounds) = bounded_command_queue(COMMAND_CAPACITY);
         let (mixer_commands, mixer_receiver) = bounded_command_queue(COMMAND_CAPACITY);
         let status = Arc::new(Mutex::new(EngineStatus::starting(device_id.clone())));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -103,6 +113,7 @@ impl AudioEngine {
                 let startup = EngineRuntime::new(
                     device_id,
                     engine_receiver,
+                    retired_sender,
                     mixer_receiver,
                     thread_status,
                     thread_stop,
@@ -122,6 +133,7 @@ impl AudioEngine {
         match startup_receiver.recv() {
             Ok(Ok(())) => Ok(Self {
                 engine_commands,
+                retired_sounds,
                 mixer_commands,
                 status,
                 stop,
@@ -139,8 +151,25 @@ impl AudioEngine {
     }
 
     pub fn play_reference_tone(&self) -> Result<(), EngineError> {
+        self.drain_retired_sounds();
         self.engine_commands
             .try_send(EngineCommand::PlayReferenceTone)?;
+        Ok(())
+    }
+
+    pub fn play_sound(&self, samples: Arc<[f32]>) -> Result<(), EngineError> {
+        if samples.is_empty() || !samples.len().is_multiple_of(CHANNELS as usize) {
+            return Err(EngineError::InvalidSoundBuffer);
+        }
+        self.drain_retired_sounds();
+        self.engine_commands
+            .try_send(EngineCommand::PlaySound(samples))?;
+        Ok(())
+    }
+
+    pub fn stop_sound(&self) -> Result<(), EngineError> {
+        self.drain_retired_sounds();
+        self.engine_commands.try_send(EngineCommand::StopSound)?;
         Ok(())
     }
 
@@ -150,10 +179,15 @@ impl AudioEngine {
     }
 
     pub fn status(&self) -> EngineStatus {
+        self.drain_retired_sounds();
         self.status
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    fn drain_retired_sounds(&self) {
+        while self.retired_sounds.try_receive().is_some() {}
     }
 
     pub fn stop(&mut self) -> Result<(), EngineError> {
@@ -241,8 +275,10 @@ struct EngineRuntime {
     pipeline: CapturePipeline,
     writer: SharedRingWriter,
     engine_commands: CommandReceiver<EngineCommand>,
+    retired_sounds: CommandSender<Arc<[f32]>>,
     mixer: RealtimeMixer,
     tone: ReferenceTone,
+    player: SoundboardPlayer,
     soundboard: Vec<f32>,
     mixed: Vec<f32>,
     silence: [f32; SILENCE_FRAMES * CHANNELS as usize],
@@ -256,6 +292,7 @@ impl EngineRuntime {
     fn new(
         device_id: Option<String>,
         engine_commands: CommandReceiver<EngineCommand>,
+        retired_sounds: CommandSender<Arc<[f32]>>,
         mixer_commands: CommandReceiver<MixerCommand>,
         status: Arc<Mutex<EngineStatus>>,
         stop: Arc<std::sync::atomic::AtomicBool>,
@@ -269,8 +306,10 @@ impl EngineRuntime {
             pipeline,
             writer,
             engine_commands,
+            retired_sounds,
             mixer: RealtimeMixer::new(CHANNELS as usize, mixer_commands),
             tone: ReferenceTone::new(),
+            player: SoundboardPlayer::new(),
             soundboard: vec![0.0; sample_capacity],
             mixed: vec![0.0; sample_capacity],
             silence: [0.0; SILENCE_FRAMES * CHANNELS as usize],
@@ -301,7 +340,7 @@ impl EngineRuntime {
 
     fn process_frames(&mut self, frames: usize) {
         let samples = frames * CHANNELS as usize;
-        self.tone.render(&mut self.soundboard[..samples]);
+        self.render_soundboard(samples);
         self.mixer.process(
             self.pipeline.output(frames),
             &self.soundboard[..samples],
@@ -312,7 +351,7 @@ impl EngineRuntime {
 
     fn process_recovery_silence(&mut self) {
         let samples = SILENCE_FRAMES * CHANNELS as usize;
-        self.tone.render(&mut self.soundboard[..samples]);
+        self.render_soundboard(samples);
         self.mixer.process(
             &self.silence,
             &self.soundboard[..samples],
@@ -365,8 +404,25 @@ impl EngineRuntime {
         while let Some(command) = self.engine_commands.try_receive() {
             match command {
                 EngineCommand::PlayReferenceTone => self.tone.trigger(880.0, 500, 0.2),
+                EngineCommand::PlaySound(samples) => {
+                    if let Some(retired) = self.player.start(samples) {
+                        let _ = self.retired_sounds.try_send(retired);
+                    }
+                }
+                EngineCommand::StopSound => {
+                    if let Some(retired) = self.player.stop() {
+                        let _ = self.retired_sounds.try_send(retired);
+                    }
+                }
             }
         }
+    }
+
+    fn render_soundboard(&mut self, samples: usize) {
+        if let Some(retired) = self.player.render(&mut self.soundboard[..samples]) {
+            let _ = self.retired_sounds.try_send(retired);
+        }
+        self.tone.render_additive(&mut self.soundboard[..samples]);
     }
 
     fn publish_metrics(&mut self) {
@@ -378,6 +434,8 @@ impl EngineRuntime {
         if let Ok(mut status) = self.status.try_lock() {
             status.mix = self.mixer.stats();
             status.ipc = Some(self.writer.health());
+            status.playback_frames = self.player.played_frames();
+            status.playback_total_frames = self.player.total_frames();
         }
     }
 
@@ -403,6 +461,64 @@ impl EngineRuntime {
         }
         status.mix = self.mixer.stats();
         status.ipc = Some(self.writer.health());
+        status.playback_frames = self.player.played_frames();
+        status.playback_total_frames = self.player.total_frames();
+    }
+}
+
+struct SoundboardPlayer {
+    active: Option<Arc<[f32]>>,
+    position: usize,
+    last_total_frames: u64,
+}
+
+impl SoundboardPlayer {
+    const fn new() -> Self {
+        Self {
+            active: None,
+            position: 0,
+            last_total_frames: 0,
+        }
+    }
+
+    fn start(&mut self, samples: Arc<[f32]>) -> Option<Arc<[f32]>> {
+        let previous = self.active.replace(samples);
+        self.position = 0;
+        self.last_total_frames = self
+            .active
+            .as_ref()
+            .map_or(0, |value| (value.len() / CHANNELS as usize) as u64);
+        previous
+    }
+
+    fn stop(&mut self) -> Option<Arc<[f32]>> {
+        self.position = 0;
+        self.last_total_frames = 0;
+        self.active.take()
+    }
+
+    fn render(&mut self, output: &mut [f32]) -> Option<Arc<[f32]>> {
+        output.fill(0.0);
+        let Some(active) = self.active.as_ref() else {
+            return None;
+        };
+        let remaining = active.len().saturating_sub(self.position);
+        let copied = remaining.min(output.len());
+        output[..copied].copy_from_slice(&active[self.position..self.position + copied]);
+        self.position += copied;
+        if self.position >= active.len() {
+            self.active.take()
+        } else {
+            None
+        }
+    }
+
+    fn played_frames(&self) -> u64 {
+        (self.position / CHANNELS as usize) as u64
+    }
+
+    const fn total_frames(&self) -> u64 {
+        self.last_total_frames
     }
 }
 
@@ -430,14 +546,15 @@ impl ReferenceTone {
         self.remaining_frames = SAMPLE_RATE as usize * duration_ms as usize / 1_000;
     }
 
-    fn render(&mut self, output: &mut [f32]) {
-        output.fill(0.0);
+    fn render_additive(&mut self, output: &mut [f32]) {
         for frame in output.chunks_exact_mut(CHANNELS as usize) {
             if self.remaining_frames == 0 {
                 break;
             }
             let sample = self.phase.sin() * self.level;
-            frame.fill(sample);
+            for output_sample in frame {
+                *output_sample += sample;
+            }
             self.phase = (self.phase + self.step) % TAU;
             self.remaining_frames -= 1;
         }
@@ -510,7 +627,7 @@ mod tests {
         let mut tone = ReferenceTone::new();
         tone.trigger(1_000.0, 10, 0.25);
         let mut output = [0.0; 512 * 2];
-        tone.render(&mut output);
+        tone.render_additive(&mut output);
         assert!(output.iter().all(|sample| sample.abs() <= 0.25));
         assert!(output[480 * 2..].iter().all(|sample| *sample == 0.0));
     }
@@ -525,5 +642,20 @@ mod tests {
         policy.succeeded();
         assert_eq!(policy.failures, 0);
         assert!(policy.ready(Instant::now()));
+    }
+
+    #[test]
+    fn soundboard_player_reports_progress_and_retires_completed_buffer() {
+        let mut player = SoundboardPlayer::new();
+        player.start(Arc::from(vec![0.25_f32; 8].into_boxed_slice()));
+        let mut first = [0.0; 4];
+        assert!(player.render(&mut first).is_none());
+        assert_eq!(first, [0.25; 4]);
+        assert_eq!(player.played_frames(), 2);
+        let mut second = [0.0; 6];
+        assert!(player.render(&mut second).is_some());
+        assert_eq!(&second[..4], &[0.25; 4]);
+        assert_eq!(&second[4..], &[0.0; 2]);
+        assert_eq!(player.played_frames(), 4);
     }
 }
