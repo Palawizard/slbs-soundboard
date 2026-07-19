@@ -231,11 +231,22 @@ impl LibraryRepository {
         self.sound_by_id(&id)?.ok_or(LibraryError::NotFound)
     }
 
-    pub fn set_sound_image(&self, sound_id: &str, hash: Option<&str>) -> Result<(), LibraryError> {
-        require_changed(self.connection.execute(
+    pub fn set_sound_image(
+        &mut self,
+        sound_id: &str,
+        hash: Option<&str>,
+    ) -> Result<Vec<String>, LibraryError> {
+        let transaction = self.connection.transaction()?;
+        require_changed(transaction.execute(
             "UPDATE sounds SET image_hash = ?1 WHERE id = ?2",
             params![hash, sound_id],
-        )?)
+        )?)?;
+        let orphaned = orphaned_asset_hashes(&transaction)?;
+        for orphaned_hash in &orphaned {
+            transaction.execute("DELETE FROM media_assets WHERE hash = ?1", [orphaned_hash])?;
+        }
+        transaction.commit()?;
+        Ok(orphaned)
     }
 
     pub fn delete_sound(
@@ -307,6 +318,11 @@ impl LibraryRepository {
             "INSERT INTO settings(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
         )?;
+        Ok(())
+    }
+
+    pub fn backup_to(&self, path: &Path) -> Result<(), LibraryError> {
+        self.connection.backup(rusqlite::MAIN_DB, path, None)?;
         Ok(())
     }
 
