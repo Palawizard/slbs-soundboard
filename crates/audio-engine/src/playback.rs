@@ -94,6 +94,16 @@ impl PolyphonicPlayer {
                         voice.paused = should_pause;
                     }
                 }
+                if let Some(voice) = self
+                    .voices
+                    .iter()
+                    .flatten()
+                    .filter(|voice| voice.id == id)
+                    .max_by_key(|voice| voice.generation)
+                {
+                    self.last_total_frames = (voice.samples.len() / CHANNELS as usize) as u64;
+                    self.last_position_frames = (voice.position / CHANNELS as usize) as u64;
+                }
                 self.last_id = Some(id);
                 self.last_paused = should_pause;
                 retired.push(samples);
