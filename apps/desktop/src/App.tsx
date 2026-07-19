@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
-import { LibrarySnapshot, Sound, Soundboard, loadLibrary, moveItem } from "./library";
+import { LibrarySnapshot, PlaybackProfile, Sound, Soundboard, loadLibrary, moveItem } from "./library";
 
 type Page = "library" | "audio";
 type Microphone = { id: string; name: string; isDefault: boolean };
@@ -20,6 +20,8 @@ type AudioStatus = {
   underrunFrames: number;
   playbackFrames: number;
   playbackTotalFrames: number;
+  playbackPaused: boolean;
+  activeVoices: number;
 };
 
 const stoppedStatus: AudioStatus = {
@@ -27,6 +29,7 @@ const stoppedStatus: AudioStatus = {
   restartCount: 0, lastError: null, peak: 0, clippedSamples: 0, queuedFrames: 0,
   overrunFrames: 0, underrunFrames: 0,
   playbackFrames: 0, playbackTotalFrames: 0,
+  playbackPaused: false, activeVoices: 0,
 };
 const statusLabels: Record<AudioStatus["state"], string> = {
   starting: "Démarrage", running: "Actif", recovering: "Reconnexion", stopped: "Arrêté",
@@ -75,19 +78,32 @@ type SoundCardProps = {
   busy: boolean;
   playing: boolean;
   progress: number;
+  paused: boolean;
   onPlay: (sound: Sound) => void;
   onRename: (sound: Sound) => void;
   onImage: (sound: Sound) => void;
   onDelete: (sound: Sound) => void;
   onMove: (from: number, to: number) => void;
+  onProfile: (sound: Sound, profile: PlaybackProfile) => void;
 };
 
-function SoundCard({ sound, index, total, busy, playing, progress, onPlay, onRename, onImage, onDelete, onMove }: SoundCardProps) {
+const replayLabels = { overlap: "Superposer", toggle: "Pause ou reprendre", stop: "Arrêter", restart: "Recommencer" } as const;
+
+function SoundCard({ sound, index, total, busy, playing, progress, paused, onPlay, onRename, onImage, onDelete, onMove, onProfile }: SoundCardProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [draft, setDraft] = useState(sound.playback);
+  useEffect(() => setDraft(sound.playback), [sound.playback]);
+  useEffect(() => {
+    if (!settingsOpen || draft === sound.playback) return;
+    const timer = window.setTimeout(() => onProfile(sound, draft), 400);
+    return () => window.clearTimeout(timer);
+  }, [draft, settingsOpen, sound, onProfile]);
+  const updateDraft = (next: Partial<PlaybackProfile>) => setDraft((current) => ({ ...current, ...next }));
   return (
     <article className="sound-card">
       <button className="sound-trigger" type="button" onClick={() => onPlay(sound)} disabled={busy} aria-label={`Jouer ${sound.title}`}>
         <SoundArtwork sound={sound} />
-        <span className="play-mark" aria-hidden="true">▶</span>
+        <span className="play-mark" aria-hidden="true">{playing && paused ? "Ⅱ" : "▶"}</span>
       </button>
       <div className="sound-copy">
         <strong title={sound.title}>{sound.title}</strong>
@@ -99,8 +115,16 @@ function SoundCard({ sound, index, total, busy, playing, progress, onPlay, onRen
         <button type="button" onClick={() => onMove(index, index + 1)} disabled={busy || index === total - 1} title="Déplacer après">→</button>
         <button type="button" onClick={() => onImage(sound)} disabled={busy} title="Choisir une image">Image</button>
         <button type="button" onClick={() => onRename(sound)} disabled={busy} title="Renommer">Renommer</button>
+        <button type="button" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)} disabled={busy}>Réglages</button>
         <button className="delete-action" type="button" onClick={() => onDelete(sound)} disabled={busy} title="Supprimer">Supprimer</button>
       </div>
+      {settingsOpen && <div className="sound-settings" aria-label={`Réglages de ${sound.title}`}>
+        <label>Volume <output>{Math.round(draft.volume * 100)} %</output><input type="range" min="0" max="2" step="0.05" value={draft.volume} onChange={(event) => updateDraft({ volume: Number(event.target.value) })} /></label>
+        <label>Hauteur <output>{draft.pitchSemitones > 0 ? "+" : ""}{draft.pitchSemitones} demi-ton{Math.abs(draft.pitchSemitones) > 1 ? "s" : ""}</output><input type="range" min="-12" max="12" step="1" value={draft.pitchSemitones} onChange={(event) => updateDraft({ pitchSemitones: Number(event.target.value) })} /></label>
+        <label>Vitesse <output>{draft.speed.toFixed(2)}×</output><input type="range" min="0.5" max="2" step="0.05" value={draft.speed} onChange={(event) => updateDraft({ speed: Number(event.target.value) })} /></label>
+        <label>Au second appui<select value={draft.replayPolicy} onChange={(event) => updateDraft({ replayPolicy: event.target.value as PlaybackProfile["replayPolicy"] })}>{Object.entries(replayLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <p className="settings-hint" role="status">Les changements sont enregistrés et joués automatiquement.</p>
+      </div>}
     </article>
   );
 }
@@ -112,7 +136,7 @@ function LibraryPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [playing, setPlaying] = useState<{ id: string; totalFrames: number; progress: number } | null>(null);
+  const [playing, setPlaying] = useState<{ id: string; totalFrames: number; progress: number; paused: boolean } | null>(null);
 
   const refresh = useCallback(async (preferredId?: string) => {
     const next = await loadLibrary();
@@ -129,10 +153,11 @@ function LibraryPage() {
     if (!playing) return;
     const timer = window.setInterval(() => {
       void invoke<AudioStatus>("audio_status").then((status) => {
+        if (status.playbackTotalFrames === 0) { setPlaying(null); return; }
         if (status.playbackTotalFrames !== playing.totalFrames) return;
         const progress = Math.min(1, status.playbackFrames / Math.max(1, playing.totalFrames));
         if (progress >= 1) setPlaying(null);
-        else setPlaying((current) => current?.id === playing.id ? { ...current, progress } : current);
+        else setPlaying((current) => current?.id === playing.id ? { ...current, progress, paused: status.playbackPaused } : current);
       }).catch((reason: unknown) => { setError(String(reason)); setPlaying(null); });
     }, 120);
     return () => window.clearInterval(timer);
@@ -210,10 +235,25 @@ function LibraryPage() {
     setError(null);
     try {
       const totalFrames = await invoke<number>("play_sound", { soundId: sound.id });
-      setPlaying({ id: sound.id, totalFrames, progress: 0 });
+      setPlaying({ id: sound.id, totalFrames, progress: 0, paused: false });
     } catch (reason) {
       setError(String(reason));
     }
+  }
+
+  const updateProfile = useCallback(async (sound: Sound, profile: PlaybackProfile) => {
+    setError(null);
+    try {
+      await invoke("update_playback_profile", { soundId: sound.id, profile });
+      setSnapshot((current) => ({ ...current, soundboards: current.soundboards.map((board) => ({ ...board, sounds: board.sounds.map((item) => item.id === sound.id ? { ...item, playback: profile } : item) })) }));
+      const totalFrames = await invoke<number>("play_sound", { soundId: sound.id });
+      setPlaying({ id: sound.id, totalFrames, progress: 0, paused: false });
+    } catch (reason) { setError(String(reason)); }
+  }, []);
+
+  async function stopPlayback() {
+    try { await invoke("stop_all_sounds"); setPlaying(null); }
+    catch (reason) { setError(String(reason)); }
   }
 
   return (
@@ -242,13 +282,13 @@ function LibraryPage() {
       <section className="library-content">
         <header className="library-header">
           <div><p className="eyebrow">Soundboard</p><h1>{selected?.title ?? "Mes sons"}</h1><p>{selected?.sounds.length ?? 0} son{selected?.sounds.length === 1 ? "" : "s"}</p></div>
-          <button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>{busy ? "Patientez…" : "Ajouter des sons"}</button>
+          <div className="header-actions"><button className="secondary-button" type="button" onClick={stopPlayback} disabled={!playing}>Tout arrêter</button><button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>{busy ? "Patientez…" : "Ajouter des sons"}</button></div>
         </header>
         {notice && <p className="notice-message" role="status">{notice}</p>}
         {error && <p className="error-message" role="alert">{error}</p>}
         {selected && selected.sounds.length > 0 ? (
           <div className="sound-grid">
-            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} playing={playing?.id === sound.id} progress={playing?.id === sound.id ? playing.progress : 0} onPlay={playSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} />)}
+            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} playing={playing?.id === sound.id} progress={playing?.id === sound.id ? playing.progress : 0} paused={playing?.id === sound.id ? playing.paused : false} onPlay={playSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} onProfile={updateProfile} />)}
           </div>
         ) : (
           <div className="empty-state"><div className="empty-icon" aria-hidden="true">♪</div><h2>Votre soundboard est vide</h2><p>Ajoutez vos premiers sons pour les retrouver ici.</p><button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>Choisir des sons</button></div>

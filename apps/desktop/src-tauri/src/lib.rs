@@ -365,6 +365,18 @@ fn play_sound(
     Ok(total_frames)
 }
 
+#[tauri::command]
+fn stop_all_sounds(audio_state: State<'_, AudioAppState>) -> Result<(), String> {
+    let slot = audio_state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
+    if let Some(engine) = slot.as_ref() {
+        engine.stop_all_sounds().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn playback_id(sound_id: &str) -> PlaybackId {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     sound_id.hash(&mut hasher);
@@ -407,6 +419,7 @@ pub fn run() {
             reorder_sounds,
             sound_image_data,
             play_sound,
+            stop_all_sounds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
