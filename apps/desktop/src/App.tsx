@@ -23,6 +23,15 @@ type AudioStatus = {
   playbackTotalFrames: number;
   playbackPaused: boolean;
   activeVoices: number;
+  monitorEnabled: boolean;
+  monitorMuted: boolean;
+  monitorGain: number;
+  monitorDeviceName: string | null;
+  monitorRestartCount: number;
+  monitorLastError: string | null;
+  monitorQueuedFrames: number;
+  monitorDroppedFrames: number;
+  monitorUnderrunFrames: number;
 };
 
 const stoppedStatus: AudioStatus = {
@@ -31,6 +40,9 @@ const stoppedStatus: AudioStatus = {
   overrunFrames: 0, underrunFrames: 0,
   playbackFrames: 0, playbackTotalFrames: 0,
   playbackPaused: false, activeVoices: 0,
+  monitorEnabled: false, monitorMuted: false, monitorGain: 1, monitorDeviceName: null,
+  monitorRestartCount: 0, monitorLastError: null, monitorQueuedFrames: 0,
+  monitorDroppedFrames: 0, monitorUnderrunFrames: 0,
 };
 const statusLabels: Record<AudioStatus["state"], string> = {
   starting: "Démarrage", running: "Actif", recovering: "Reconnexion", stopped: "Arrêté",
@@ -334,24 +346,51 @@ function LibraryPage() {
   );
 }
 
+type MixControlBus = "microphone" | "soundboard" | "master";
+
 function AudioPage() {
   const [microphones, setMicrophones] = useState<Microphone[]>([]); const [selectedId, setSelectedId] = useState("");
   const [status, setStatus] = useState<AudioStatus>(stoppedStatus); const [busy, setBusy] = useState(false);
-  const [muted, setMuted] = useState(false); const [error, setError] = useState<string | null>(null);
+  const [levels, setLevels] = useState<Record<MixControlBus, number>>({ microphone: 1, soundboard: 1, master: 1 });
+  const [mutes, setMutes] = useState<Record<MixControlBus, boolean>>({ microphone: false, soundboard: false, master: false });
+  const [monitorEnabled, setMonitorEnabled] = useState(false); const [monitorMuted, setMonitorMuted] = useState(false); const [monitorGain, setMonitorGain] = useState(1);
+  const [error, setError] = useState<string | null>(null);
   const isRunning = status.state === "running" || status.state === "recovering";
   const selectedMicrophone = microphones.find((microphone) => microphone.id === selectedId);
   useEffect(() => { void invoke<Microphone[]>("list_microphones").then((devices) => { setMicrophones(devices); setSelectedId((devices.find((device) => device.isDefault) ?? devices[0])?.id ?? ""); }).catch((reason: unknown) => setError(String(reason))); }, []);
   useEffect(() => { const refresh = () => void invoke<AudioStatus>("audio_status").then(setStatus).catch((reason: unknown) => setError(String(reason))); refresh(); const timer = window.setInterval(refresh, 500); return () => window.clearInterval(timer); }, []);
-  async function startAudio() { if (!selectedId) return; setBusy(true); setError(null); try { await invoke("start_audio", { deviceId: selectedId }); setStatus(await invoke<AudioStatus>("audio_status")); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } }
-  async function stopAudio() { setBusy(true); try { await invoke("stop_audio"); setStatus(stoppedStatus); setMuted(false); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } }
-  async function toggleMute() { try { await invoke("set_microphone_muted", { muted: !muted }); setMuted(!muted); } catch (reason) { setError(String(reason)); } }
+  async function startAudio() {
+    if (!selectedId) return; setBusy(true); setError(null);
+    try {
+      await invoke("start_audio", { deviceId: selectedId });
+      for (const bus of ["microphone", "soundboard", "master"] as const) {
+        await invoke("set_master_gain", { bus, gain: levels[bus] });
+        await invoke("set_master_muted", { bus, muted: mutes[bus] });
+      }
+      await invoke("set_monitor_gain", { gain: monitorGain });
+      await invoke("set_monitor_muted", { muted: monitorMuted });
+      await invoke("set_monitoring", { enabled: monitorEnabled });
+      setStatus(await invoke<AudioStatus>("audio_status"));
+    } catch (reason) { setError(String(reason)); } finally { setBusy(false); }
+  }
+  async function stopAudio() { setBusy(true); try { await invoke("stop_audio"); setStatus(stoppedStatus); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } }
+  async function changeLevel(bus: MixControlBus, gain: number) { setLevels((current) => ({ ...current, [bus]: gain })); if (isRunning) try { await invoke("set_master_gain", { bus, gain }); } catch (reason) { setError(String(reason)); } }
+  async function toggleBusMute(bus: MixControlBus) { const muted = !mutes[bus]; setMutes((current) => ({ ...current, [bus]: muted })); if (isRunning) try { await invoke("set_master_muted", { bus, muted }); } catch (reason) { setError(String(reason)); } }
+  async function toggleMonitoring() { const enabled = !monitorEnabled; try { await invoke("set_monitoring", { enabled }); setMonitorEnabled(enabled); } catch (reason) { setError(String(reason)); } }
+  async function changeMonitorGain(gain: number) { setMonitorGain(gain); if (isRunning) try { await invoke("set_monitor_gain", { gain }); } catch (reason) { setError(String(reason)); } }
+  async function toggleMonitorMute() { const muted = !monitorMuted; try { await invoke("set_monitor_muted", { muted }); setMonitorMuted(muted); } catch (reason) { setError(String(reason)); } }
   return (
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">Chemin audio</p><h1>Microphone virtuel</h1></div><span className={`status status-${status.state}`}><span className="status-dot" />{statusLabels[status.state]}</span></header>
       <section className="audio-panel" aria-labelledby="audio-title"><div className="panel-copy"><p className="eyebrow">Source physique</p><h2 id="audio-title">Choisissez votre microphone</h2><p>Votre voix et les sons seront réunis dans « SLB Virtual Microphone ».</p></div>
         <label className="field-label" htmlFor="microphone-select">Microphone d’entrée</label><select id="microphone-select" value={selectedId} onChange={(event) => setSelectedId(event.target.value)} disabled={isRunning || busy}>{microphones.length === 0 && <option value="">Aucun microphone détecté</option>}{microphones.map((microphone) => <option key={microphone.id} value={microphone.id}>{microphone.name}{microphone.isDefault ? " — par défaut" : ""}</option>)}</select>
-        <div className="actions">{!isRunning ? <button className="primary-button" type="button" onClick={startAudio} disabled={!selectedId || busy}>{busy ? "Démarrage…" : "Démarrer"}</button> : <button className="danger-button" type="button" onClick={stopAudio} disabled={busy}>Arrêter</button>}<button className="secondary-button" type="button" onClick={toggleMute} disabled={!isRunning}>{muted ? "Réactiver ma voix" : "Couper ma voix"}</button><button className="secondary-button" type="button" onClick={() => invoke("play_reference_sound")} disabled={!isRunning}>Jouer le son test</button></div>
+        <div className="actions">{!isRunning ? <button className="primary-button" type="button" onClick={startAudio} disabled={!selectedId || busy}>{busy ? "Démarrage…" : "Démarrer"}</button> : <button className="danger-button" type="button" onClick={stopAudio} disabled={busy}>Arrêter</button>}<button className="secondary-button" type="button" onClick={() => void invoke("play_reference_sound").catch((reason: unknown) => setError(String(reason)))} disabled={!isRunning}>Jouer le son test</button></div>
         <div className="signal-card"><div><span className="signal-label">Entrée</span><strong>{selectedMicrophone?.name ?? "Non sélectionnée"}</strong></div><div className="route-line"><span /></div><div><span className="signal-label">Sortie</span><strong>SLB Virtual Microphone</strong></div></div>
-        {isRunning && <dl className="metrics"><div><dt>Format</dt><dd>{status.inputSampleRate ? `${status.inputSampleRate / 1000} kHz` : "—"}</dd></div><div><dt>Niveau</dt><dd>{Math.round(status.peak * 100)} %</dd></div><div><dt>File audio</dt><dd>{status.queuedFrames} trames</dd></div><div><dt>Reconnexions</dt><dd>{status.restartCount}</dd></div></dl>}{(error || status.lastError) && <p className="error-message" role="alert">{error ?? status.lastError}</p>}
+        <section className="mix-controls" aria-labelledby="mix-controls-title"><div className="mix-heading"><div><p className="eyebrow">Mixage</p><h2 id="mix-controls-title">Niveaux maîtres</h2></div><span>{Math.round(status.peak * 100)} %</span></div>
+          {(["microphone", "soundboard", "master"] as const).map((bus) => <div className="mix-row" key={bus}><label htmlFor={`gain-${bus}`}>{bus === "microphone" ? "Microphone" : bus === "soundboard" ? "Sons" : "Sortie virtuelle"}</label><input id={`gain-${bus}`} type="range" min="0" max="2" step="0.05" value={levels[bus]} onChange={(event) => void changeLevel(bus, Number(event.target.value))} /><output>{Math.round(levels[bus] * 100)} %</output><button type="button" onClick={() => void toggleBusMute(bus)} disabled={!isRunning}>{mutes[bus] ? "Réactiver" : "Couper"}</button></div>)}
+          <div className="monitor-control"><div><strong>Écoute locale des sons</strong><span>{status.monitorDeviceName ?? "Sortie par défaut"}{status.monitorRestartCount > 0 ? ` · ${status.monitorRestartCount} reconnexion${status.monitorRestartCount > 1 ? "s" : ""}` : ""}</span></div><button className="secondary-button" type="button" onClick={toggleMonitoring} disabled={!isRunning}>{monitorEnabled ? "Désactiver" : "Activer"}</button></div>
+          <div className="mix-row"><label htmlFor="monitor-gain">Volume d’écoute</label><input id="monitor-gain" type="range" min="0" max="2" step="0.05" value={monitorGain} onChange={(event) => void changeMonitorGain(Number(event.target.value))} /><output>{Math.round(monitorGain * 100)} %</output><button type="button" onClick={toggleMonitorMute} disabled={!isRunning || !monitorEnabled}>{monitorMuted ? "Réactiver" : "Couper"}</button></div>
+        </section>
+        {isRunning && <dl className="metrics"><div><dt>Format</dt><dd>{status.inputSampleRate ? `${status.inputSampleRate / 1000} kHz` : "—"}</dd></div><div><dt>Écrêtages</dt><dd>{status.clippedSamples}</dd></div><div><dt>File virtuelle</dt><dd>{status.queuedFrames} trames</dd></div><div><dt>Reconnexions</dt><dd>{status.restartCount}</dd></div></dl>}{(error || status.lastError || (monitorEnabled && status.monitorLastError)) && <p className="error-message" role="alert">{error ?? status.lastError ?? status.monitorLastError}</p>}
       </section></section>
   );
 }

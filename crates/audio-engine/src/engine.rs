@@ -5,11 +5,12 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
+use crate::monitor::{MonitorOutput, MonitorProducer};
 use crate::playback::PolyphonicPlayer;
 use crate::{
-    CHANNELS, CaptureError, CaptureSource, DEFAULT_CAPACITY_FRAMES, IpcError, IpcHealth, MixStats,
-    RealtimeMixer, SAMPLE_RATE, SharedRingWriter, WasapiCaptureSource, WindowedSincResampler,
-    bounded_command_queue,
+    CHANNELS, CaptureError, CaptureSource, DEFAULT_CAPACITY_FRAMES, IpcError, IpcHealth, MixBus,
+    MixStats, RealtimeMixer, SAMPLE_RATE, SharedRingWriter, WasapiCaptureSource,
+    WindowedSincResampler, bounded_command_queue,
 };
 use crate::{CommandReceiver, CommandSender, MixerCommand, QueueFull, ResampleError};
 use crate::{PlaybackId, ReplayPolicy};
@@ -41,6 +42,7 @@ pub struct EngineStatus {
     pub playback_total_frames: u64,
     pub playback_paused: bool,
     pub active_voices: usize,
+    pub monitor: crate::MonitorStatus,
 }
 
 impl EngineStatus {
@@ -58,6 +60,7 @@ impl EngineStatus {
             playback_total_frames: 0,
             playback_paused: false,
             active_voices: 0,
+            monitor: crate::MonitorStatus::default(),
         }
     }
 }
@@ -104,6 +107,7 @@ pub struct AudioEngine {
     engine_commands: CommandSender<EngineCommand>,
     retired_sounds: CommandReceiver<Arc<[f32]>>,
     mixer_commands: CommandSender<MixerCommand>,
+    monitor: MonitorOutput,
     status: Arc<Mutex<EngineStatus>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -114,6 +118,8 @@ impl AudioEngine {
         let (engine_commands, engine_receiver) = bounded_command_queue(COMMAND_CAPACITY);
         let (retired_sender, retired_sounds) = bounded_command_queue(COMMAND_CAPACITY * 16);
         let (mixer_commands, mixer_receiver) = bounded_command_queue(COMMAND_CAPACITY);
+        let monitor = MonitorOutput::start().map_err(|_| EngineError::ThreadStart)?;
+        let monitor_producer = monitor.producer();
         let status = Arc::new(Mutex::new(EngineStatus::starting(device_id.clone())));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
@@ -128,6 +134,7 @@ impl AudioEngine {
                     engine_receiver,
                     retired_sender,
                     mixer_receiver,
+                    monitor_producer,
                     thread_status,
                     thread_stop,
                 );
@@ -148,6 +155,7 @@ impl AudioEngine {
                 engine_commands,
                 retired_sounds,
                 mixer_commands,
+                monitor,
                 status,
                 stop,
                 thread: Some(audio_thread),
@@ -202,15 +210,45 @@ impl AudioEngine {
 
     pub fn send_mixer_command(&self, command: MixerCommand) -> Result<(), EngineError> {
         self.mixer_commands.try_send(command)?;
+        match command {
+            MixerCommand::SetGain {
+                bus: MixBus::Soundboard,
+                gain,
+            } => self.monitor.set_master_gain(gain),
+            MixerCommand::SetMuted {
+                bus: MixBus::Soundboard,
+                muted,
+            } => self.monitor.set_master_muted(muted),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn set_monitor_enabled(&self, enabled: bool) {
+        self.monitor.set_enabled(enabled);
+    }
+
+    pub fn set_monitor_muted(&self, muted: bool) {
+        self.monitor.set_muted(muted);
+    }
+
+    pub fn set_monitor_gain(&self, gain: f32) -> Result<(), EngineError> {
+        if !gain.is_finite() || !(0.0..=2.0).contains(&gain) {
+            return Err(EngineError::InvalidSoundGain);
+        }
+        self.monitor.set_gain(gain);
         Ok(())
     }
 
     pub fn status(&self) -> EngineStatus {
         self.drain_retired_sounds();
-        self.status
+        let mut status = self
+            .status
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .clone();
+        status.monitor = self.monitor.status();
+        status
     }
 
     fn drain_retired_sounds(&self) {
@@ -304,6 +342,7 @@ struct EngineRuntime {
     engine_commands: CommandReceiver<EngineCommand>,
     retired_sounds: CommandSender<Arc<[f32]>>,
     mixer: RealtimeMixer,
+    monitor: MonitorProducer,
     tone: ReferenceTone,
     player: PolyphonicPlayer,
     soundboard: Vec<f32>,
@@ -321,6 +360,7 @@ impl EngineRuntime {
         engine_commands: CommandReceiver<EngineCommand>,
         retired_sounds: CommandSender<Arc<[f32]>>,
         mixer_commands: CommandReceiver<MixerCommand>,
+        monitor: MonitorProducer,
         status: Arc<Mutex<EngineStatus>>,
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Self, EngineError> {
@@ -335,6 +375,7 @@ impl EngineRuntime {
             engine_commands,
             retired_sounds,
             mixer: RealtimeMixer::new(CHANNELS as usize, mixer_commands),
+            monitor,
             tone: ReferenceTone::new(),
             player: PolyphonicPlayer::new(),
             soundboard: vec![0.0; sample_capacity],
@@ -368,6 +409,7 @@ impl EngineRuntime {
     fn process_frames(&mut self, frames: usize) {
         let samples = frames * CHANNELS as usize;
         self.render_soundboard(samples);
+        self.monitor.push(&self.soundboard[..samples]);
         self.mixer.process(
             self.pipeline.output(frames),
             &self.soundboard[..samples],
@@ -379,6 +421,7 @@ impl EngineRuntime {
     fn process_recovery_silence(&mut self) {
         let samples = SILENCE_FRAMES * CHANNELS as usize;
         self.render_soundboard(samples);
+        self.monitor.push(&self.soundboard[..samples]);
         self.mixer.process(
             &self.silence,
             &self.soundboard[..samples],

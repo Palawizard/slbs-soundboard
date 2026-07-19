@@ -460,7 +460,9 @@ fn validate_playback_profile(profile: &PlaybackProfile) -> Result<(), LibraryErr
             value.trim().is_empty()
                 || value.len() > 80
                 || !value.is_ascii()
-                || value.chars().any(|character| character.is_ascii_whitespace())
+                || value
+                    .chars()
+                    .any(|character| character.is_ascii_whitespace())
                 || !value.contains('+')
         })
     {
