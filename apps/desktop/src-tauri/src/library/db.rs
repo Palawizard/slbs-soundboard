@@ -231,6 +231,14 @@ impl LibraryRepository {
         self.sound_by_id(&id)?.ok_or(LibraryError::NotFound)
     }
 
+    pub fn rename_sound(&self, id: &str, title: &str) -> Result<(), LibraryError> {
+        let title = validate_title(title, 120)?;
+        require_changed(self.connection.execute(
+            "UPDATE sounds SET title = ?1 WHERE id = ?2",
+            params![title, id],
+        )?)
+    }
+
     pub fn set_sound_image(
         &mut self,
         sound_id: &str,

@@ -109,6 +109,11 @@ impl LibraryService {
         self.backup()
     }
 
+    pub fn rename_sound(&mut self, sound_id: &str, title: &str) -> Result<(), LibraryError> {
+        self.repository.rename_sound(sound_id, title)?;
+        self.backup()
+    }
+
     pub fn remove_sound(
         &mut self,
         soundboard_id: &str,
