@@ -25,6 +25,7 @@ struct LibraryAppState {
 struct LibrarySnapshot {
     soundboards: Vec<Soundboard>,
     recovery_notice: Option<String>,
+    active_soundboard_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -206,8 +207,14 @@ fn library_snapshot(state: State<'_, LibraryAppState>) -> Result<LibrarySnapshot
         Ok(LibrarySnapshot {
             soundboards: service.soundboards()?,
             recovery_notice: service.recovery_notice(),
+            active_soundboard_id: service.active_soundboard_id()?,
         })
     })
+}
+
+#[tauri::command]
+fn select_soundboard(id: String, state: State<'_, LibraryAppState>) -> Result<(), String> {
+    with_library(state, |service| service.set_active_soundboard(&id))
 }
 
 #[tauri::command]
@@ -355,6 +362,7 @@ pub fn run() {
             play_reference_sound,
             set_microphone_muted,
             library_snapshot,
+            select_soundboard,
             create_soundboard,
             rename_soundboard,
             delete_soundboard,

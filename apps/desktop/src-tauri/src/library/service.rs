@@ -54,6 +54,18 @@ impl LibraryService {
         self.recovery_notice.take()
     }
 
+    pub fn active_soundboard_id(&self) -> Result<Option<String>, LibraryError> {
+        self.repository.setting("active_soundboard")
+    }
+
+    pub fn set_active_soundboard(&mut self, id: &str) -> Result<(), LibraryError> {
+        if !self.soundboards()?.iter().any(|board| board.id == id) {
+            return Err(LibraryError::NotFound);
+        }
+        self.repository.set_setting("active_soundboard", id)?;
+        self.backup()
+    }
+
     pub fn create_soundboard(&mut self, title: &str) -> Result<Soundboard, LibraryError> {
         let board = self.repository.create_soundboard(title)?;
         self.backup()?;

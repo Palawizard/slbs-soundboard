@@ -106,7 +106,7 @@ function SoundCard({ sound, index, total, busy, playing, progress, onPlay, onRen
 }
 
 function LibraryPage() {
-  const [snapshot, setSnapshot] = useState<LibrarySnapshot>({ soundboards: [], recoveryNotice: null });
+  const [snapshot, setSnapshot] = useState<LibrarySnapshot>({ soundboards: [], recoveryNotice: null, activeSoundboardId: null });
   const [selectedId, setSelectedId] = useState("");
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -119,7 +119,7 @@ function LibraryPage() {
     setSnapshot(next);
     setNotice(next.recoveryNotice);
     setSelectedId((current) => {
-      const preferred = preferredId ?? current;
+      const preferred = preferredId ?? (current || next.activeSoundboardId || "");
       return next.soundboards.some((board) => board.id === preferred) ? preferred : (next.soundboards[0]?.id ?? "");
     });
   }, []);
@@ -150,10 +150,14 @@ function LibraryPage() {
     event.preventDefault();
     const title = newTitle.trim(); if (!title) return;
     setNewTitle("");
-    await run(async () => {
+    setBusy(true); setError(null); setNotice(null);
+    try {
       const board = await invoke<Soundboard>("create_soundboard", { title });
-      await refresh(board.id); setNotice("Soundboard créé.");
-    });
+      await invoke("select_soundboard", { id: board.id });
+      await refresh(board.id);
+      setNotice("Soundboard créé.");
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
   }
 
   async function renameBoard(board: Soundboard) {
@@ -224,7 +228,7 @@ function LibraryPage() {
         <div className="board-list">
           {snapshot.soundboards.map((board, index) => (
             <div className={`board-row ${selected?.id === board.id ? "selected" : ""}`} key={board.id}>
-              <button className="board-select" type="button" onClick={() => setSelectedId(board.id)}><strong>{board.title}</strong><span>{board.sounds.length} son{board.sounds.length > 1 ? "s" : ""}</span></button>
+              <button className="board-select" type="button" onClick={() => { setSelectedId(board.id); void invoke("select_soundboard", { id: board.id }).catch((reason: unknown) => setError(String(reason))); }}><strong>{board.title}</strong><span>{board.sounds.length} son{board.sounds.length > 1 ? "s" : ""}</span></button>
               <div className="board-actions">
                 <button type="button" onClick={() => moveBoard(index, index - 1)} disabled={busy || index === 0} title="Monter">↑</button>
                 <button type="button" onClick={() => moveBoard(index, index + 1)} disabled={busy || index === snapshot.soundboards.length - 1} title="Descendre">↓</button>

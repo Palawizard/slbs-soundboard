@@ -24,6 +24,7 @@ export type Soundboard = {
 export type LibrarySnapshot = {
   soundboards: Soundboard[];
   recoveryNotice: string | null;
+  activeSoundboardId: string | null;
 };
 
 export function moveItem<T>(items: T[], from: number, to: number): T[] {

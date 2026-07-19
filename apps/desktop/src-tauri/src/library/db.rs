@@ -531,8 +531,8 @@ mod tests {
             Some(board.id.clone())
         );
         assert_eq!(
-            repository.list_soundboards().unwrap()[0].sounds,
-            [sound.clone()]
+            repository.list_soundboards().unwrap()[0].sounds.as_slice(),
+            std::slice::from_ref(&sound)
         );
         let orphaned = repository.delete_sound(&board.id, &sound.id).unwrap();
         assert_eq!(orphaned, ["abc"]);

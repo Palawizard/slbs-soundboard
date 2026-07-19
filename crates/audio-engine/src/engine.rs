@@ -499,9 +499,7 @@ impl SoundboardPlayer {
 
     fn render(&mut self, output: &mut [f32]) -> Option<Arc<[f32]>> {
         output.fill(0.0);
-        let Some(active) = self.active.as_ref() else {
-            return None;
-        };
+        let active = self.active.as_ref()?;
         let remaining = active.len().saturating_sub(self.position);
         let copied = remaining.min(output.len());
         output[..copied].copy_from_slice(&active[self.position..self.position + copied]);

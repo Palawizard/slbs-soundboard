@@ -16,7 +16,7 @@ describe("library interface", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
     vi.mocked(invoke).mockImplementation(async (command) => {
-      if (command === "library_snapshot") return { soundboards: [{ id: "board-1", title: "Favoris", position: 0, sounds: [sound] }], recoveryNotice: null };
+      if (command === "library_snapshot") return { soundboards: [{ id: "board-1", title: "Favoris", position: 0, sounds: [sound] }], recoveryNotice: null, activeSoundboardId: "board-1" };
       if (command === "play_sound") return 60_000;
       if (command === "audio_status") return { playbackFrames: 0, playbackTotalFrames: 60_000 };
       if (command === "create_soundboard") return { id: "board-2", title: "Jeux", position: 1, sounds: [] };
