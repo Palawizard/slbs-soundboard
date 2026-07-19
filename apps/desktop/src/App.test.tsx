@@ -1,0 +1,41 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import App from "./App";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+
+const sound = {
+  id: "sound-1", title: "Cloche", audioHash: "abc", audioExtension: "wav",
+  durationMs: 1_250, sampleRate: 48_000, channels: 2, imageHash: null,
+  imageExtension: null, waveform: [0.2, 0.7, 0.4], createdAtMs: 1,
+};
+
+describe("library interface", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "library_snapshot") return { soundboards: [{ id: "board-1", title: "Favoris", position: 0, sounds: [sound] }], recoveryNotice: null };
+      if (command === "play_sound") return 60_000;
+      if (command === "audio_status") return { playbackFrames: 0, playbackTotalFrames: 60_000 };
+      if (command === "create_soundboard") return { id: "board-2", title: "Jeux", position: 1, sounds: [] };
+      return undefined;
+    });
+  });
+
+  it("loads a soundboard and triggers an imported sound", async () => {
+    render(<App />);
+    expect(await screen.findByText("Cloche")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Jouer Cloche" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("play_sound", { soundId: "sound-1" }));
+  });
+
+  it("creates a soundboard from the library rail", async () => {
+    render(<App />);
+    const field = await screen.findByPlaceholderText("Nouveau soundboard");
+    fireEvent.change(field, { target: { value: "Jeux" } });
+    fireEvent.click(screen.getByRole("button", { name: "Créer le soundboard" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("create_soundboard", { title: "Jeux" }));
+  });
+});

@@ -557,4 +557,33 @@ mod tests {
             .iter()
             .any(|item| item.id == board.id));
     }
+
+    #[test]
+    fn rolls_back_a_failed_migration() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("migration.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);")
+            .unwrap();
+        connection.execute_batch(MIGRATIONS[0]).unwrap();
+        connection
+            .execute("INSERT INTO schema_migrations(version) VALUES (1)", [])
+            .unwrap();
+        connection
+            .execute_batch(
+                "ALTER TABLE sounds ADD COLUMN waveform_json TEXT NOT NULL DEFAULT '[]';",
+            )
+            .unwrap();
+        drop(connection);
+
+        assert!(LibraryRepository::open(&path).is_err());
+        let connection = Connection::open(path).unwrap();
+        let version: i64 = connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 1);
+    }
 }

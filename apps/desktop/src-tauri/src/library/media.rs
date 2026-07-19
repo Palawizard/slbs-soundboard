@@ -428,6 +428,22 @@ mod tests {
     }
 
     #[test]
+    fn validates_and_stores_decodable_images() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("cover.png");
+        image::RgbImage::from_pixel(16, 16, image::Rgb([30, 80, 160]))
+            .save(&source)
+            .unwrap();
+        let store = MediaStore::new(temporary.path().join("media")).unwrap();
+        let imported = store.import_image(&source).unwrap();
+        assert_eq!(imported.extension, "png");
+        assert_eq!(
+            store.read_image(&imported.hash, "png").unwrap(),
+            fs::read(source).unwrap()
+        );
+    }
+
+    #[test]
     fn converts_decoded_audio_to_engine_format() {
         let input = DecodedAudio {
             samples: vec![0.5; 8_000],
