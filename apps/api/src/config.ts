@@ -13,6 +13,7 @@ const environmentSchema = z.object({
   SESSION_SECRET: z.string().min(32),
   FFMPEG_PROBE_PATH: z.string().min(1).default("ffprobe"),
   TRUST_PROXY: z.enum(["true", "false"]).default("false"),
+  ADMIN_TOKEN: z.string().min(32).optional(),
 });
 
 export type ApiConfig = {
@@ -27,6 +28,7 @@ export type ApiConfig = {
   sessionSecret: string;
   ffprobePath: string;
   trustProxy: boolean;
+  adminToken?: string;
 };
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -43,5 +45,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     sessionSecret: parsed.SESSION_SECRET,
     ffprobePath: parsed.FFMPEG_PROBE_PATH,
     trustProxy: parsed.TRUST_PROXY === "true",
+    ...(parsed.ADMIN_TOKEN ? { adminToken: parsed.ADMIN_TOKEN } : {}),
   };
 }

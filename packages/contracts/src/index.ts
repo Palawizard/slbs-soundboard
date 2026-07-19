@@ -90,7 +90,7 @@ export const communitySoundSchema = z.object({
 
 export const publicationListQuerySchema = z.object({
   q: z.string().trim().max(80).optional(),
-  cursor: z.string().regex(/^[A-Za-z0-9_-]{8,512}$/).optional(),
+  cursor: z.string().regex(/^[A-Za-z0-9_.-]{8,512}$/).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 
