@@ -300,6 +300,8 @@ impl Drop for SharedRingWriter {
 mod tests {
     use super::*;
 
+    static SHARED_MAPPING_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn consume(writer: &SharedRingWriter, frames: usize) -> Vec<f32> {
         let header = writer.core.header();
         let read = header.read_frame.load(Ordering::Relaxed);
@@ -337,6 +339,7 @@ mod tests {
 
     #[test]
     fn ring_preserves_order_across_wrap() {
+        let _guard = SHARED_MAPPING_TEST.lock().unwrap();
         let mut writer = SharedRingWriter::create(4).unwrap();
         writer.write(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
         assert_eq!(consume(&writer, 2), [1.0, 2.0, 3.0, 4.0]);
@@ -349,6 +352,7 @@ mod tests {
 
     #[test]
     fn full_ring_drops_new_frames_and_reports_overrun() {
+        let _guard = SHARED_MAPPING_TEST.lock().unwrap();
         let mut writer = SharedRingWriter::create(2).unwrap();
         let result = writer.write(&[0.0, 0.0, 1.0, 1.0, 2.0, 2.0]).unwrap();
         assert_eq!(result.written_frames, 2);
@@ -358,6 +362,7 @@ mod tests {
 
     #[test]
     fn rejects_partial_frames_and_invalid_capacity() {
+        let _guard = SHARED_MAPPING_TEST.lock().unwrap();
         assert!(matches!(
             SharedRingWriter::create(3),
             Err(IpcError::InvalidCapacity)

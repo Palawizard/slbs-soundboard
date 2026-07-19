@@ -3,6 +3,7 @@ mod command;
 mod engine;
 mod ipc;
 mod mixer;
+mod quality;
 mod resampler;
 
 #[cfg(windows)]
@@ -18,6 +19,7 @@ pub use ipc::{
     SAMPLE_RATE, SharedRingWriter,
 };
 pub use mixer::{MixBus, MixStats, MixerCommand, RealtimeMixer};
+pub use quality::{AudioQualityReport, run_reference_quality_probe};
 pub use resampler::{ResampleError, ResampleResult, WindowedSincResampler};
 
 #[cfg(windows)]
