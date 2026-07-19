@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildServer, type ServerDependencies } from "../src/server.js";
 import type { ApiConfig } from "../src/config.js";
+import { DomainError } from "../src/domain.js";
 
 const servers = [] as ReturnType<typeof buildServer>[];
 afterEach(async () => { await Promise.all(servers.splice(0).map((server) => server.close())); });
@@ -30,5 +31,14 @@ describe("health endpoint", () => {
   it("fails readiness while PostgreSQL is unavailable", async () => {
     const server = buildServer(dependencies(false)); servers.push(server);
     expect((await server.inject({ method: "GET", url: "/health" })).statusCode).toBe(503);
+  });
+
+  it("uses 401 for a missing or expired application session", async () => {
+    const values = dependencies(true);
+    values.auth = { authenticate: vi.fn(async () => { throw new DomainError("unauthorized", "Une connexion est requise."); }) } as unknown as ServerDependencies["auth"];
+    const server = buildServer(values); servers.push(server);
+    const response = await server.inject({ method: "GET", url: "/v1/me" });
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe("unauthorized");
   });
 });

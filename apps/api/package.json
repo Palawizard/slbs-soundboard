@@ -7,7 +7,8 @@
     "dev": "tsx watch src/start.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run test/postgres.integration.test.ts test/media-inspector.integration.test.ts"
   },
   "dependencies": {
     "@fastify/multipart": "^9.4.0",

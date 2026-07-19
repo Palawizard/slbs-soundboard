@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import { mkdtemp, readdir, readFile, rm, utimes } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -21,7 +21,9 @@ describe("quarantine media storage", () => {
 
   it("rejects oversized input at the byte boundary", async () => {
     const root = await mkdtemp(join(tmpdir(), "slb-media-")); roots.push(root);
-    await expect(streamToFile(Readable.from([Buffer.alloc(MAX_IMAGE_BYTES + 1)]), join(root, "upload"), MAX_IMAGE_BYTES)).rejects.toThrow("taille");
+    const path = join(root, "upload");
+    await expect(streamToFile(Readable.from([Buffer.alloc(MAX_IMAGE_BYTES + 1)]), path, MAX_IMAGE_BYTES)).rejects.toThrow("taille");
+    await expect(access(path)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("promotes only validated storage keys and cleans old quarantine files", async () => {
