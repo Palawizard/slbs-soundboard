@@ -94,6 +94,10 @@ export function buildServer(dependencies: ServerDependencies): FastifyInstance {
     const query = publicationListQuerySchema.parse(request.query);
     return publications.list({ ...(query.q ? { query: query.q } : {}), ...(query.cursor ? { cursor: query.cursor } : {}), limit: query.limit });
   });
+  server.get(`/v1/me/publications`, async (request) => {
+    const user = await auth.authenticate(request.headers.authorization);
+    return { items: await publications.listOwned(user.id) };
+  });
   server.get<{ Params: { id: string } }>(`/v1/publications/:id`, async (request) => publications.get(idSchema.parse(request.params.id)));
   server.get<{ Params: { id: string } }>(`/v1/publications/:id/import`, async (request) => {
     await auth.authenticate(request.headers.authorization);

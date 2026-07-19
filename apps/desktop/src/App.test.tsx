@@ -12,6 +12,7 @@ const sound = {
   id: "sound-1", title: "Cloche", audioHash: "abc", audioExtension: "wav",
   durationMs: 1_250, sampleRate: 48_000, channels: 2, imageHash: null,
   imageExtension: null, waveform: [0.2, 0.7, 0.4], createdAtMs: 1,
+  publicationId: null,
   playback: { volume: 1, pitchSemitones: 0, speed: 1, replayPolicy: "restart", keybind: null },
 };
 

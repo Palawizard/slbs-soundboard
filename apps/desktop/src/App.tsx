@@ -4,8 +4,11 @@ import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } f
 import "./App.css";
 import { LibrarySnapshot, PlaybackProfile, Sound, Soundboard, loadLibrary, moveItem } from "./library";
 import { shortcutFromKeyboardEvent, shortcutLabel, useGlobalShortcuts } from "./shortcuts";
+import { CommunityPage } from "./CommunityPage";
+import { SettingsPage } from "./SettingsPage";
+import { communityApi, useCommunityStore } from "./community";
 
-type Page = "library" | "audio";
+type Page = "library" | "audio" | "community" | "settings";
 type Microphone = { id: string; name: string; isDefault: boolean };
 type AudioStatus = {
   state: "starting" | "running" | "recovering" | "stopped";
@@ -397,5 +400,7 @@ function AudioPage() {
 
 export default function App() {
   const [page, setPage] = useState<Page>("library");
-  return <main className="app-shell"><aside className="sidebar"><div className="brand-mark">SLB</div><nav aria-label="Navigation principale"><button className={`nav-item ${page === "library" ? "active" : ""}`} type="button" onClick={() => setPage("library")}>Mes soundboards</button><button className={`nav-item ${page === "audio" ? "active" : ""}`} type="button" onClick={() => setPage("audio")}>Audio</button><button className="nav-item" type="button" disabled>Communauté</button></nav></aside>{page === "library" ? <LibraryPage /> : <AudioPage />}</main>;
+  const setSession = useCommunityStore((state) => state.setSession);
+  useEffect(() => { void communityApi.session().then(setSession).catch(() => setSession(null)); }, [setSession]);
+  return <main className="app-shell"><aside className="sidebar"><div className="brand-mark">SLB</div><nav aria-label="Navigation principale"><button className={`nav-item ${page === "library" ? "active" : ""}`} type="button" onClick={() => setPage("library")}>Mes soundboards</button><button className={`nav-item ${page === "audio" ? "active" : ""}`} type="button" onClick={() => setPage("audio")}>Audio</button><button className={`nav-item ${page === "community" ? "active" : ""}`} type="button" onClick={() => setPage("community")}>Communauté</button><button className={`nav-item ${page === "settings" ? "active" : ""}`} type="button" onClick={() => setPage("settings")}>Réglages</button></nav></aside>{page === "library" ? <LibraryPage /> : page === "audio" ? <AudioPage /> : page === "community" ? <CommunityPage /> : <SettingsPage />}</main>;
 }

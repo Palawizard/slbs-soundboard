@@ -110,6 +110,110 @@ impl LibraryService {
         Ok(sound)
     }
 
+    pub fn import_community_sound(
+        &mut self,
+        soundboard_id: &str,
+        audio_path: &Path,
+        image_path: Option<&Path>,
+        title: &str,
+    ) -> Result<Sound, LibraryError> {
+        let audio = self.media.import_audio(audio_path)?;
+        let image = image_path
+            .map(|path| self.media.import_image(path))
+            .transpose()?;
+        let result = self.repository.create_community_sound(
+            soundboard_id,
+            NewSound {
+                title,
+                audio_hash: &audio.asset.hash,
+                duration_ms: audio.duration_ms,
+                sample_rate: audio.sample_rate,
+                channels: audio.channels,
+                waveform: &audio.waveform,
+            },
+            &audio.asset,
+            image.as_ref(),
+        );
+        if result.is_err() {
+            for asset in std::iter::once(&audio.asset).chain(image.iter()) {
+                if self.repository.media_asset(&asset.hash)?.is_none() {
+                    self.media.remove(&asset.hash)?;
+                }
+            }
+        }
+        let sound = result?;
+        self.backup()?;
+        Ok(sound)
+    }
+
+    pub fn sound_assets(
+        &self,
+        sound_id: &str,
+    ) -> Result<(Sound, PathBuf, Option<PathBuf>), LibraryError> {
+        let sound = self
+            .soundboards()?
+            .into_iter()
+            .flat_map(|board| board.sounds)
+            .find(|sound| sound.id == sound_id)
+            .ok_or(LibraryError::NotFound)?;
+        let audio = self
+            .media
+            .asset_path("audio", &sound.audio_hash, &sound.audio_extension);
+        let image = sound
+            .image_hash
+            .as_ref()
+            .zip(sound.image_extension.as_ref())
+            .map(|(hash, extension)| self.media.asset_path("images", hash, extension));
+        Ok((sound, audio, image))
+    }
+
+    pub fn set_publication(
+        &mut self,
+        sound_id: &str,
+        publication_id: &str,
+        audio_hash: &str,
+    ) -> Result<(), LibraryError> {
+        self.repository
+            .set_publication(sound_id, publication_id, audio_hash)?;
+        self.backup()
+    }
+
+    pub fn clear_publication(&mut self, publication_id: &str) -> Result<(), LibraryError> {
+        self.repository.clear_publication(publication_id)?;
+        self.backup()
+    }
+
+    pub fn reconcile_publications(
+        &mut self,
+        remote: &[(String, String)],
+    ) -> Result<(), LibraryError> {
+        let values = self
+            .soundboards()?
+            .into_iter()
+            .flat_map(|board| board.sounds)
+            .filter_map(|sound| {
+                remote
+                    .iter()
+                    .find(|(_, hash)| hash == &sound.audio_hash)
+                    .map(|(publication_id, hash)| (sound.id, publication_id.clone(), hash.clone()))
+            })
+            .collect::<Vec<_>>();
+        self.repository.replace_publications(&values)?;
+        self.backup()
+    }
+
+    pub fn diagnostics_enabled(&self) -> Result<bool, LibraryError> {
+        Ok(self.repository.setting("diagnostics_enabled")?.as_deref() != Some("false"))
+    }
+
+    pub fn set_diagnostics_enabled(&mut self, enabled: bool) -> Result<(), LibraryError> {
+        self.repository.set_setting(
+            "diagnostics_enabled",
+            if enabled { "true" } else { "false" },
+        )?;
+        self.backup()
+    }
+
     pub fn set_sound_image(&mut self, sound_id: &str, path: &Path) -> Result<(), LibraryError> {
         let image = self.media.import_image(path)?;
         self.repository.add_media_asset(&image)?;

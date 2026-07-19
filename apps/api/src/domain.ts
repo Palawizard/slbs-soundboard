@@ -81,6 +81,7 @@ export interface CommunityRepository {
   findOwnedMedia(userId: string, id: string, kind?: MediaKind): Promise<OwnedMediaRecord | null>;
   createPublication(userId: string, input: { title: string; description: string; audioMediaId: string; imageMediaId: string | null }): Promise<PublicationRecord>;
   listPublications(input: { query?: string; cursor?: PublicationCursor; limit: number }): Promise<PublicationRecord[]>;
+  listOwnedPublications(userId: string): Promise<PublicationRecord[]>;
   findPublication(id: string, includeInactive?: boolean): Promise<PublicationRecord | null>;
   deletePublication(userId: string, id: string): Promise<boolean>;
   disablePublication(id: string, reason: string): Promise<boolean>;
