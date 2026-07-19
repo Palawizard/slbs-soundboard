@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use image::ImageReader;
 use sha2::{Digest, Sha256};
-use slb_audio_engine::{WindowedSincResampler, CHANNELS, SAMPLE_RATE};
+use slb_audio_engine::{
+    process_playback_dsp, PlaybackDspProfile, WindowedSincResampler, CHANNELS, SAMPLE_RATE,
+};
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
@@ -43,6 +45,14 @@ pub struct DecodedAudio {
 
 impl DecodedAudio {
     pub fn into_engine_samples(self) -> Result<Vec<f32>, LibraryError> {
+        self.into_engine_samples_with_profile(0.0, 1.0)
+    }
+
+    pub fn into_engine_samples_with_profile(
+        self,
+        pitch_semitones: f32,
+        speed: f32,
+    ) -> Result<Vec<f32>, LibraryError> {
         let channels = self.channels as usize;
         let input_frames = self.samples.len() / channels;
         let mut stereo = Vec::with_capacity(input_frames * CHANNELS as usize);
@@ -50,40 +60,51 @@ impl DecodedAudio {
             stereo.push(frame[0]);
             stereo.push(if channels == 1 { frame[0] } else { frame[1] });
         }
-        if self.sample_rate == SAMPLE_RATE {
-            return Ok(stereo);
-        }
+        let stereo = if self.sample_rate == SAMPLE_RATE {
+            stereo
+        } else {
+            resample_to_engine_rate(stereo, self.sample_rate, input_frames)?
+        };
+        let profile = PlaybackDspProfile::new(pitch_semitones, speed)
+            .map_err(|_| LibraryError::InvalidPlaybackProfile)?;
+        process_playback_dsp(&stereo, profile).map_err(|_| LibraryError::AudioDecode)
+    }
+}
 
-        const CHUNK_FRAMES: usize = 4_096;
-        let mut resampler = WindowedSincResampler::new(
-            self.sample_rate,
-            SAMPLE_RATE,
-            CHANNELS as usize,
-            CHUNK_FRAMES,
-        )
-        .map_err(|_| LibraryError::AudioDecode)?;
-        let expected_frames =
-            (input_frames as u64 * SAMPLE_RATE as u64).div_ceil(self.sample_rate as u64) as usize;
-        let mut result = Vec::with_capacity((expected_frames + 64) * CHANNELS as usize);
-        let output_frames = ((CHUNK_FRAMES as u64 * SAMPLE_RATE as u64)
-            .div_ceil(self.sample_rate as u64) as usize)
-            + 64;
-        let mut output = vec![0.0; output_frames * CHANNELS as usize];
-        for chunk in stereo.chunks(CHUNK_FRAMES * CHANNELS as usize) {
-            let written = resampler
-                .process(chunk, &mut output)
-                .map_err(|_| LibraryError::AudioDecode)?
-                .output_frames_written;
-            result.extend_from_slice(&output[..written * CHANNELS as usize]);
-        }
-        let silence = [0.0_f32; 64 * CHANNELS as usize];
+fn resample_to_engine_rate(
+    stereo: Vec<f32>,
+    input_sample_rate: u32,
+    input_frames: usize,
+) -> Result<Vec<f32>, LibraryError> {
+    const CHUNK_FRAMES: usize = 4_096;
+    let mut resampler = WindowedSincResampler::new(
+        input_sample_rate,
+        SAMPLE_RATE,
+        CHANNELS as usize,
+        CHUNK_FRAMES,
+    )
+    .map_err(|_| LibraryError::AudioDecode)?;
+    let expected_frames =
+        (input_frames as u64 * SAMPLE_RATE as u64).div_ceil(input_sample_rate as u64) as usize;
+    let mut result = Vec::with_capacity((expected_frames + 64) * CHANNELS as usize);
+    let output_frames = ((CHUNK_FRAMES as u64 * SAMPLE_RATE as u64)
+        .div_ceil(input_sample_rate as u64) as usize)
+        + 64;
+    let mut output = vec![0.0; output_frames * CHANNELS as usize];
+    for chunk in stereo.chunks(CHUNK_FRAMES * CHANNELS as usize) {
         let written = resampler
-            .process(&silence, &mut output)
+            .process(chunk, &mut output)
             .map_err(|_| LibraryError::AudioDecode)?
             .output_frames_written;
         result.extend_from_slice(&output[..written * CHANNELS as usize]);
-        Ok(result)
     }
+    let silence = [0.0_f32; 64 * CHANNELS as usize];
+    let written = resampler
+        .process(&silence, &mut output)
+        .map_err(|_| LibraryError::AudioDecode)?
+        .output_frames_written;
+    result.extend_from_slice(&output[..written * CHANNELS as usize]);
+    Ok(result)
 }
 
 impl MediaStore {

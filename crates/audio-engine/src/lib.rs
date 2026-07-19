@@ -1,5 +1,6 @@
 mod capture;
 mod command;
+mod dsp;
 mod engine;
 mod ipc;
 mod mixer;
@@ -13,6 +14,7 @@ pub use capture::{
     AudioDevice, AudioFormat, CaptureError, CaptureSource, DeviceCatalog, SampleEncoding,
 };
 pub use command::{CommandReceiver, CommandSender, QueueFull, bounded_command_queue};
+pub use dsp::{DspError, PlaybackDspProfile, process_playback_dsp};
 pub use engine::{AudioEngine, EngineError, EngineState, EngineStatus};
 pub use ipc::{
     CHANNELS, DEFAULT_CAPACITY_FRAMES, HEADER_SIZE, IpcError, IpcHealth, RingWriteResult,

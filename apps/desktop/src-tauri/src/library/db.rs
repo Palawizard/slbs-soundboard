@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
 
-use super::models::{MediaAsset, Sound, Soundboard};
+use super::models::{MediaAsset, PlaybackProfile, ReplayPolicy, Sound, Soundboard};
 use super::LibraryError;
 
 const MIGRATIONS: &[&str] = &[
@@ -53,6 +53,14 @@ const MIGRATIONS: &[&str] = &[
     "#,
     r#"
     ALTER TABLE sounds ADD COLUMN waveform_json TEXT NOT NULL DEFAULT '[]';
+    "#,
+    r#"
+    ALTER TABLE sounds ADD COLUMN volume REAL NOT NULL DEFAULT 1.0 CHECK (volume BETWEEN 0.0 AND 2.0);
+    ALTER TABLE sounds ADD COLUMN pitch_semitones REAL NOT NULL DEFAULT 0.0 CHECK (pitch_semitones BETWEEN -12.0 AND 12.0);
+    ALTER TABLE sounds ADD COLUMN speed REAL NOT NULL DEFAULT 1.0 CHECK (speed BETWEEN 0.5 AND 2.0);
+    ALTER TABLE sounds ADD COLUMN replay_policy TEXT NOT NULL DEFAULT 'restart' CHECK (replay_policy IN ('overlap', 'toggle', 'stop', 'restart'));
+    ALTER TABLE sounds ADD COLUMN keybind TEXT;
+    CREATE UNIQUE INDEX sounds_keybind_idx ON sounds(keybind) WHERE keybind IS NOT NULL;
     "#,
 ];
 
@@ -245,6 +253,18 @@ impl LibraryRepository {
         )?)
     }
 
+    pub fn update_playback_profile(
+        &self,
+        id: &str,
+        profile: &PlaybackProfile,
+    ) -> Result<(), LibraryError> {
+        validate_playback_profile(profile)?;
+        require_changed(self.connection.execute(
+            "UPDATE sounds SET volume = ?1, pitch_semitones = ?2, speed = ?3, replay_policy = ?4, keybind = ?5 WHERE id = ?6",
+            params![profile.volume, profile.pitch_semitones, profile.speed, profile.replay_policy.as_str(), profile.keybind, id],
+        )?)
+    }
+
     pub fn set_sound_image(
         &mut self,
         sound_id: &str,
@@ -360,7 +380,7 @@ impl LibraryRepository {
 
     fn list_sounds(&self, soundboard_id: &str) -> Result<Vec<Sound>, LibraryError> {
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.created_at_ms
+            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.volume, s.pitch_semitones, s.speed, s.replay_policy, s.keybind, s.created_at_ms
              FROM soundboard_sounds ss
              JOIN sounds s ON s.id = ss.sound_id
              JOIN media_assets audio ON audio.hash = s.audio_hash
@@ -375,7 +395,7 @@ impl LibraryRepository {
 
     fn sound_by_id(&self, sound_id: &str) -> Result<Option<Sound>, LibraryError> {
         Ok(self.connection.query_row(
-            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.created_at_ms
+            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.volume, s.pitch_semitones, s.speed, s.replay_policy, s.keybind, s.created_at_ms
              FROM sounds s JOIN media_assets audio ON audio.hash = s.audio_hash
              LEFT JOIN media_assets image ON image.hash = s.image_hash WHERE s.id = ?1",
             [sound_id], map_sound,
@@ -395,7 +415,15 @@ fn map_sound(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sound> {
         image_hash: row.get(7)?,
         image_extension: row.get(8)?,
         waveform: serde_json::from_str(&row.get::<_, String>(9)?).unwrap_or_default(),
-        created_at_ms: row.get(10)?,
+        playback: PlaybackProfile {
+            volume: row.get(10)?,
+            pitch_semitones: row.get(11)?,
+            speed: row.get(12)?,
+            replay_policy: ReplayPolicy::try_from(row.get::<_, String>(13)?.as_str())
+                .unwrap_or(ReplayPolicy::Restart),
+            keybind: row.get(14)?,
+        },
+        created_at_ms: row.get(15)?,
     })
 }
 
@@ -405,6 +433,24 @@ fn validate_title(title: &str, maximum: usize) -> Result<&str, LibraryError> {
         Err(LibraryError::InvalidTitle)
     } else {
         Ok(title)
+    }
+}
+
+fn validate_playback_profile(profile: &PlaybackProfile) -> Result<(), LibraryError> {
+    if !profile.volume.is_finite()
+        || !profile.pitch_semitones.is_finite()
+        || !profile.speed.is_finite()
+        || !(0.0..=2.0).contains(&profile.volume)
+        || !(-12.0..=12.0).contains(&profile.pitch_semitones)
+        || !(0.5..=2.0).contains(&profile.speed)
+        || profile
+            .keybind
+            .as_ref()
+            .is_some_and(|value| value.trim().is_empty())
+    {
+        Err(LibraryError::InvalidPlaybackProfile)
+    } else {
+        Ok(())
     }
 }
 
@@ -526,14 +572,26 @@ mod tests {
         repository
             .set_setting("active_soundboard", &board.id)
             .unwrap();
+        repository
+            .update_playback_profile(
+                &sound.id,
+                &PlaybackProfile {
+                    volume: 1.4,
+                    pitch_semitones: 3.0,
+                    speed: 1.25,
+                    replay_policy: ReplayPolicy::Overlap,
+                    keybind: Some("Control+Shift+KeyA".to_owned()),
+                },
+            )
+            .unwrap();
         assert_eq!(
             repository.setting("active_soundboard").unwrap(),
             Some(board.id.clone())
         );
-        assert_eq!(
-            repository.list_soundboards().unwrap()[0].sounds.as_slice(),
-            std::slice::from_ref(&sound)
-        );
+        let stored_sound = repository.list_soundboards().unwrap()[0].sounds[0].clone();
+        assert_eq!(stored_sound.id, sound.id);
+        assert_eq!(stored_sound.playback.volume, 1.4);
+        assert_eq!(stored_sound.playback.replay_policy, ReplayPolicy::Overlap);
         let orphaned = repository.delete_sound(&board.id, &sound.id).unwrap();
         assert_eq!(orphaned, ["abc"]);
         assert!(repository.media_asset("abc").unwrap().is_none());

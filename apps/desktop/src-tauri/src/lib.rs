@@ -10,7 +10,7 @@ use tauri::{Manager, State};
 
 mod library;
 
-use library::{LibraryService, Sound, Soundboard};
+use library::{LibraryService, PlaybackProfile, Sound, Soundboard};
 
 struct AudioAppState {
     engine: Mutex<Option<AudioEngine>>,
@@ -265,6 +265,17 @@ fn rename_sound(
 }
 
 #[tauri::command]
+fn update_playback_profile(
+    sound_id: String,
+    profile: PlaybackProfile,
+    state: State<'_, LibraryAppState>,
+) -> Result<(), String> {
+    with_library(state, |service| {
+        service.update_playback_profile(&sound_id, &profile)
+    })
+}
+
+#[tauri::command]
 fn set_sound_image(
     sound_id: String,
     path: String,
@@ -369,6 +380,7 @@ pub fn run() {
             reorder_soundboards,
             import_sound,
             rename_sound,
+            update_playback_profile,
             set_sound_image,
             delete_sound,
             reorder_sounds,

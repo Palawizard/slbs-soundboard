@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
-    DecodedAudio, LibraryError, LibraryRepository, MediaStore, NewSound, Sound, Soundboard,
+    DecodedAudio, LibraryError, LibraryRepository, MediaStore, NewSound, PlaybackProfile, Sound,
+    Soundboard,
 };
 
 pub struct LibraryService {
@@ -124,6 +125,15 @@ impl LibraryService {
 
     pub fn rename_sound(&mut self, sound_id: &str, title: &str) -> Result<(), LibraryError> {
         self.repository.rename_sound(sound_id, title)?;
+        self.backup()
+    }
+
+    pub fn update_playback_profile(
+        &mut self,
+        sound_id: &str,
+        profile: &PlaybackProfile,
+    ) -> Result<(), LibraryError> {
+        self.repository.update_playback_profile(sound_id, profile)?;
         self.backup()
     }
 
