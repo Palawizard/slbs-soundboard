@@ -18,18 +18,19 @@ Abstract:
 //
 // Mic in (external: headphone) range.
 //
-#define MICIN_DEVICE_MAX_CHANNELS           1       // Max Channels.
-#define MICIN_MIN_BITS_PER_SAMPLE_PCM       16      // Min Bits Per Sample
-#define MICIN_MAX_BITS_PER_SAMPLE_PCM       16      // Max Bits Per Sample
-#define MICIN_MIN_SAMPLE_RATE               8000    // Min Sample Rate
+#define MICIN_DEVICE_MAX_CHANNELS           2       // Stereo preserves the f32 engine mix.
+#define MICIN_MIN_BITS_PER_SAMPLE_PCM       32      // IEEE f32 transport.
+#define MICIN_MAX_BITS_PER_SAMPLE_PCM       32      // IEEE f32 transport.
+#define MICIN_MIN_SAMPLE_RATE               48000   // Canonical engine rate.
 #define MICIN_MAX_SAMPLE_RATE               48000   // Max Sample Rate
 
 //
 // Max # of pin instances.
 //
-#define MICIN_MAX_INPUT_STREAMS             5
+#define MICIN_MAX_INPUT_STREAMS             1
 
 //=============================================================================
+#if 0 // Original SysVAD PCM formats are retained for upstream comparison.
 static 
 KSDATAFORMAT_WAVEFORMATEXTENSIBLE MicInPinSupportedDeviceFormats[] =
 {
@@ -262,6 +263,46 @@ MODE_AND_DEFAULT_FORMAT MicInPinSupportedDeviceModes[] =
         &MicInPinSupportedDeviceFormats[2].DataFormat, // 16KHz
     },
 };
+#endif
+
+static
+KSDATAFORMAT_WAVEFORMATEXTENSIBLE MicInPinSupportedDeviceFormats[] =
+{
+    {
+        {
+            sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
+            0,
+            0,
+            0,
+            STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
+            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT),
+            STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
+        },
+        {
+            {
+                WAVE_FORMAT_EXTENSIBLE,
+                2,
+                48000,
+                384000,
+                8,
+                32,
+                sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
+            },
+            32,
+            KSAUDIO_SPEAKER_STEREO,
+            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)
+        }
+    }
+};
+
+static
+MODE_AND_DEFAULT_FORMAT MicInPinSupportedDeviceModes[] =
+{
+    { STATIC_AUDIO_SIGNALPROCESSINGMODE_RAW, &MicInPinSupportedDeviceFormats[0].DataFormat },
+    { STATIC_AUDIO_SIGNALPROCESSINGMODE_DEFAULT, &MicInPinSupportedDeviceFormats[0].DataFormat },
+    { STATIC_AUDIO_SIGNALPROCESSINGMODE_SPEECH, &MicInPinSupportedDeviceFormats[0].DataFormat },
+    { STATIC_AUDIO_SIGNALPROCESSINGMODE_COMMUNICATIONS, &MicInPinSupportedDeviceFormats[0].DataFormat },
+};
 
 //
 // The entries here must follow the same order as the filter's pin
@@ -317,7 +358,7 @@ KSDATARANGE_AUDIO MicInPinDataRangesStream[] =
             0,
             0,
             STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
-            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
+            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT),
             STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
         },
         MICIN_DEVICE_MAX_CHANNELS,           

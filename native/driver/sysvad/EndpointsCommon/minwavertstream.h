@@ -17,6 +17,7 @@ Abstract:
 
 #include "savedata.h"
 #include "tonegenerator.h"
+#include "slb_ring.h"
 
 
 //
@@ -121,6 +122,7 @@ protected:
     ULONG                       m_ulContentId;
     CSaveData                   m_SaveData;
     ToneGenerator               m_ToneGenerator;
+    SLB_RING_READER             m_SlbRing;
     GUID                        m_SignalProcessingMode;
     BOOLEAN                     m_bEoSReceived;
     BOOLEAN                     m_bLastBufferRendered;

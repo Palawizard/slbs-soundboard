@@ -189,6 +189,7 @@
     <ClCompile Include="minwavertstream.cpp" />
     <ClCompile Include="NewDelete.cpp" />
     <ClCompile Include="speakerhptopo.cpp" />
+    <ClCompile Include="slb_ring.cpp" />
     <ClCompile Include="speakertopo.cpp" />
     <ClCompile Include="usbhsminwavert.cpp" />
     <ClCompile Include="usbhsmictopo.cpp" />

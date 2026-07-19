@@ -104,6 +104,7 @@ Return Value:
     // DPCs to complete before we free the notification DPC.
     //
     KeFlushQueuedDpcs();
+    SlbRingClose(&m_SlbRing);
 
 #ifdef SYSVAD_BTH_BYPASS
     ASSERT(m_SidebandOpen == FALSE);
@@ -249,6 +250,7 @@ Return Value:
     m_bLastBufferRendered = FALSE;
     m_pAudioModules = NULL;
     m_AudioModuleCount = 0;
+    SlbRingInitialize(&m_SlbRing);
 
     m_ulHostCaptureToneFrequency = IsEqualGUID(SignalProcessingMode, AUDIO_SIGNALPROCESSINGMODE_RAW) ? 1000 : 2000;
     m_ulLoopbackCaptureToneFrequency = 3000; // 3 kHz
@@ -314,6 +316,12 @@ Return Value:
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     RtlCopyMemory(m_pWfExt, pWfEx, sizeof(WAVEFORMATEX) + pWfEx->cbSize);
+
+    if (m_bCapture)
+    {
+        // A missing producer is valid: the endpoint publishes safe silence.
+        (void)SlbRingOpen(&m_SlbRing);
+    }
 
     m_pbMuted = (PBOOL)ExAllocatePool2(POOL_FLAG_NON_PAGED, m_pWfExt->Format.nChannels * sizeof(BOOL), MINWAVERTSTREAM_POOLTAG);
     if (m_pbMuted == NULL)
@@ -1516,7 +1524,7 @@ ByteDisplacement - # of bytes to process.
     while (ByteDisplacement > 0)
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-            m_ToneGenerator.GenerateSine(m_pDmaBuffer + bufferOffset, runWrite);
+        SlbRingReadFloatStereo(&m_SlbRing, m_pDmaBuffer + bufferOffset, runWrite);
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
     }

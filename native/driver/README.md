@@ -2,6 +2,8 @@
 
 This directory contains the Windows capture driver used by SLB's Soundboard. It exposes one software microphone endpoint at 48 kHz. The implementation is derived from Microsoft's SysVAD sample at commit `2ee527bfeb0aeb6be11f0a8b6dce4011b358ce89`; the imported files remain covered by the Microsoft Public License in `sysvad/MICROSOFT-LICENSE.txt`.
 
+The endpoint transports stereo IEEE `f32` at 48 kHz without an additional encode/decode step. The desktop engine writes to a power-of-two shared-memory ring. The driver pins the mapped pages before real-time access, never waits or allocates in the DPC path, and emits silence whenever the producer is missing, stale or underruns.
+
 ## Requirements
 
 - Visual Studio 2022 Build Tools with the Windows Driver Kit component
