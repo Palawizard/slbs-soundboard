@@ -1,0 +1,113 @@
+[Version]
+Signature="$Windows NT$"
+Class=MEDIA
+ClassGuid={4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider=%ProviderName%
+DriverVer=07/19/2026,1.0.0.0
+CatalogFile=SlbVirtualAudio.cat
+PnpLockDown=1
+
+[SourceDisksNames]
+1=%DiskName%,,,
+
+[SourceDisksFiles]
+SlbVirtualAudio.sys=1
+
+[DestinationDirs]
+DriverCopy=13
+
+[Manufacturer]
+%ManufacturerName%=Models,NT$ARCH$.10.0...19041
+
+[Models.NT$ARCH$.10.0...19041]
+%DeviceDescription%=Install,Root\SLBVirtualMicrophone
+
+[DriverCopy]
+SlbVirtualAudio.sys
+
+[Install]
+Include=ks.inf,wdmaudio.inf
+Needs=KS.Registration,WDMAUDIO.Registration
+CopyFiles=DriverCopy
+AddReg=Driver.AddReg
+
+[Driver.AddReg]
+HKR,,AssociatedFilters,0x00000000,"wdmaud,swmidi,redbook"
+HKR,,Driver,0x00000000,SlbVirtualAudio.sys
+HKR,Drivers,SubClasses,0x00000000,"wave,midi,mixer"
+HKR,Drivers\wave\wdmaud.drv,Driver,0x00000000,wdmaud.drv
+HKR,Drivers\midi\wdmaud.drv,Driver,0x00000000,wdmaud.drv
+HKR,Drivers\mixer\wdmaud.drv,Driver,0x00000000,wdmaud.drv
+HKR,Drivers\wave\wdmaud.drv,Description,0x00000000,%DeviceDescription%
+HKR,Drivers\midi\wdmaud.drv,Description,0x00000000,%MidiDescription%
+HKR,Drivers\mixer\wdmaud.drv,Description,0x00000000,%DeviceDescription%
+HKR,%MediaCategories%\%MicrophoneCategoryGuid%,Name,0x00000000,%EndpointName%
+
+[Install.Interfaces]
+AddInterface=%KSCATEGORY_AUDIO%,%KSNAME_WaveMicIn%,WaveMic.Interface
+AddInterface=%KSCATEGORY_REALTIME%,%KSNAME_WaveMicIn%,WaveMic.Interface
+AddInterface=%KSCATEGORY_CAPTURE%,%KSNAME_WaveMicIn%,WaveMic.Interface
+AddInterface=%KSCATEGORY_AUDIO%,%KSNAME_TopologyMicIn%,TopologyMic.Interface
+AddInterface=%KSCATEGORY_TOPOLOGY%,%KSNAME_TopologyMicIn%,TopologyMic.Interface
+
+[WaveMic.Interface]
+AddReg=WaveMic.Interface.AddReg
+
+[WaveMic.Interface.AddReg]
+HKR,,CLSID,0x00000000,%ProxyClsid%
+HKR,,FriendlyName,0x00000000,%WaveFriendlyName%
+
+[TopologyMic.Interface]
+AddReg=TopologyMic.Interface.AddReg
+
+[TopologyMic.Interface.AddReg]
+HKR,,CLSID,0x00000000,%ProxyClsid%
+HKR,,FriendlyName,0x00000000,%TopologyFriendlyName%
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,0x00000000,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
+[Install.Services]
+AddService=SlbVirtualAudio,0x00000002,Driver.Service
+
+[Driver.Service]
+DisplayName=%ServiceDescription%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\SlbVirtualAudio.sys
+
+[Install.HW]
+AddReg=Hardware.AddReg
+
+[Hardware.AddReg]
+HKR,,DeviceType,0x00010001,0x0000001D
+HKR,,Security,0x00000000,"D:P(A;;GA;;;SY)(A;;GRGWGX;;;BA)(A;;GRGWGX;;;WD)(A;;GRGWGX;;;RC)"
+
+[Install.Wdf]
+KmdfService=SlbVirtualAudio,Driver.Wdf
+
+[Driver.Wdf]
+KmdfLibraryVersion=$KMDFVERSION$
+
+[Strings]
+ProviderName="SLB's Soundboard"
+ManufacturerName="SLB's Soundboard"
+DiskName="SLB Virtual Audio Driver"
+DeviceDescription="SLB Virtual Microphone"
+EndpointName="SLB Virtual Microphone"
+ServiceDescription="SLB Virtual Microphone Driver"
+MidiDescription="SLB Virtual Audio MIDI"
+WaveFriendlyName="SLB Virtual Microphone Wave"
+TopologyFriendlyName="SLB Virtual Microphone Topology"
+KSNAME_WaveMicIn="WaveMicIn"
+KSNAME_TopologyMicIn="TopologyMicIn"
+ProxyClsid="{17CCA71B-ECD7-11D0-B908-00A0C9223196}"
+KSCATEGORY_AUDIO="{6994AD04-93EF-11D0-A3CC-00A0C9223196}"
+KSCATEGORY_CAPTURE="{65E8773D-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_REALTIME="{EB115FFC-10C8-4964-831D-6DCB02E6F23F}"
+KSCATEGORY_TOPOLOGY="{DDA54A40-1E4C-11D1-A050-405705C10000}"
+KSNODETYPE_ANY="{00000000-0000-0000-0000-000000000000}"
+PKEY_AudioEndpoint_Association="{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},2"
+PKEY_AudioEndpoint_Supports_EventDriven_Mode="{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},7"
+MediaCategories="MediaCategories"
+MicrophoneCategoryGuid="{A9C66B14-12B4-4D88-A16F-AF36D33A2D27}"

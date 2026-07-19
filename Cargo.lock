@@ -562,6 +562,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "803d13fb3b09d88be9f4dbc29062c66b19bf7170867ceb746d2a8689bf6c7a26"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3036,11 +3045,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
+name = "slb-audio-engine"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-queue",
+ "thiserror 2.0.19",
+ "windows",
+]
+
+[[package]]
 name = "slbs-soundboard"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "slb-audio-engine",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

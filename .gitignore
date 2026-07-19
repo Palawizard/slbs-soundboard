@@ -23,3 +23,9 @@ coverage/
 *.cat
 *.sys
 
+# Windows driver build artifacts
+native/driver/**/x64/
+native/driver/**/ARM64/
+native/driver/package/
+native/driver/**/*.inf
+!native/driver/**/*.inx
