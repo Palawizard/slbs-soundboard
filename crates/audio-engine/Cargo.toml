@@ -8,6 +8,7 @@ crossbeam-queue = "0.3"
 thiserror = "2"
 
 [target.'cfg(windows)'.dependencies]
+cpal = "0.16"
 windows = { version = "0.61", features = [
   "Win32_Devices_FunctionDiscovery",
   "Win32_Foundation",
@@ -21,3 +22,6 @@ windows = { version = "0.61", features = [
   "Win32_System_Variant",
   "Win32_UI_Shell_PropertiesSystem",
 ] }
+
+[dev-dependencies]
+proptest = "1.11.0"

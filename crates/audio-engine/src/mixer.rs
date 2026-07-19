@@ -6,6 +6,7 @@ const DEFAULT_GAIN_RAMP_FRAMES: u32 = 128;
 pub enum MixBus {
     Microphone,
     Soundboard,
+    Master,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -65,6 +66,7 @@ pub struct RealtimeMixer {
     commands: CommandReceiver<MixerCommand>,
     microphone: GainState,
     soundboard: GainState,
+    master: GainState,
     stats: MixStats,
 }
 
@@ -76,6 +78,7 @@ impl RealtimeMixer {
             commands,
             microphone: GainState::unity(),
             soundboard: GainState::unity(),
+            master: GainState::unity(),
             stats: MixStats::default(),
         }
     }
@@ -95,12 +98,14 @@ impl RealtimeMixer {
         for (frame_index, output_frame) in output.chunks_exact_mut(self.channels).enumerate() {
             let microphone_gain = self.microphone.next_frame();
             let soundboard_gain = self.soundboard.next_frame();
+            let master_gain = self.master.next_frame();
 
             for (channel, output_sample) in output_frame.iter_mut().enumerate() {
                 let sample_index = frame_index * self.channels + channel;
-                let mixed = microphone.get(sample_index).copied().unwrap_or_default()
+                let mixed = (microphone.get(sample_index).copied().unwrap_or_default()
                     * microphone_gain
-                    + soundboard.get(sample_index).copied().unwrap_or_default() * soundboard_gain;
+                    + soundboard.get(sample_index).copied().unwrap_or_default() * soundboard_gain)
+                    * master_gain;
                 if mixed.abs() > 1.0 {
                     self.stats.clipped_samples += 1;
                 }
@@ -125,6 +130,7 @@ impl RealtimeMixer {
         match bus {
             MixBus::Microphone => &mut self.microphone,
             MixBus::Soundboard => &mut self.soundboard,
+            MixBus::Master => &mut self.master,
         }
     }
 }
@@ -164,5 +170,29 @@ mod tests {
 
         assert_eq!(output, [1.0; 4]);
         assert_eq!(mixer.stats().clipped_samples, 4);
+    }
+
+    #[test]
+    fn master_gain_and_mute_apply_after_bus_mix() {
+        let (sender, receiver) = bounded_command_queue(8);
+        let mut mixer = RealtimeMixer::new(1, receiver);
+        sender
+            .try_send(MixerCommand::SetGain {
+                bus: MixBus::Master,
+                gain: 0.5,
+            })
+            .unwrap();
+        let mut output = [0.0; 256];
+        mixer.process(&[0.5; 256], &[0.5; 256], &mut output);
+        assert!((output[255] - 0.5).abs() < 0.001);
+
+        sender
+            .try_send(MixerCommand::SetMuted {
+                bus: MixBus::Master,
+                muted: true,
+            })
+            .unwrap();
+        mixer.process(&[0.5], &[0.5], &mut output[..1]);
+        assert_eq!(output[0], 0.0);
     }
 }

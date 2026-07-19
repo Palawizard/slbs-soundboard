@@ -11,7 +11,18 @@ export type Sound = {
   imageHash: string | null;
   imageExtension: string | null;
   waveform: number[];
+  playback: PlaybackProfile;
   createdAtMs: number;
+};
+
+export type ReplayPolicy = "overlap" | "toggle" | "stop" | "restart";
+
+export type PlaybackProfile = {
+  volume: number;
+  pitchSemitones: number;
+  speed: number;
+  replayPolicy: ReplayPolicy;
+  keybind: string | null;
 };
 
 export type Soundboard = {

@@ -5,12 +5,15 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
+use crate::monitor::{MonitorOutput, MonitorProducer};
+use crate::playback::PolyphonicPlayer;
 use crate::{
-    CHANNELS, CaptureError, CaptureSource, DEFAULT_CAPACITY_FRAMES, IpcError, IpcHealth, MixStats,
-    RealtimeMixer, SAMPLE_RATE, SharedRingWriter, WasapiCaptureSource, WindowedSincResampler,
-    bounded_command_queue,
+    CHANNELS, CaptureError, CaptureSource, DEFAULT_CAPACITY_FRAMES, IpcError, IpcHealth, MixBus,
+    MixStats, RealtimeMixer, SAMPLE_RATE, SharedRingWriter, WasapiCaptureSource,
+    WindowedSincResampler, bounded_command_queue,
 };
 use crate::{CommandReceiver, CommandSender, MixerCommand, QueueFull, ResampleError};
+use crate::{PlaybackId, ReplayPolicy};
 
 const COMMAND_CAPACITY: usize = 64;
 const CAPTURE_TIMEOUT: Duration = Duration::from_millis(10);
@@ -37,6 +40,9 @@ pub struct EngineStatus {
     pub ipc: Option<IpcHealth>,
     pub playback_frames: u64,
     pub playback_total_frames: u64,
+    pub playback_paused: bool,
+    pub active_voices: usize,
+    pub monitor: crate::MonitorStatus,
 }
 
 impl EngineStatus {
@@ -52,6 +58,9 @@ impl EngineStatus {
             ipc: None,
             playback_frames: 0,
             playback_total_frames: 0,
+            playback_paused: false,
+            active_voices: 0,
+            monitor: crate::MonitorStatus::default(),
         }
     }
 }
@@ -72,6 +81,8 @@ pub enum EngineError {
     ThreadPanicked,
     #[error("sound buffer must contain complete stereo frames")]
     InvalidSoundBuffer,
+    #[error("sound gain must be between zero and two")]
+    InvalidSoundGain,
 }
 
 impl From<QueueFull> for EngineError {
@@ -83,14 +94,20 @@ impl From<QueueFull> for EngineError {
 #[derive(Clone, Debug)]
 enum EngineCommand {
     PlayReferenceTone,
-    PlaySound(Arc<[f32]>),
-    StopSound,
+    TriggerSound {
+        id: PlaybackId,
+        samples: Arc<[f32]>,
+        gain: f32,
+        policy: ReplayPolicy,
+    },
+    StopAllSounds,
 }
 
 pub struct AudioEngine {
     engine_commands: CommandSender<EngineCommand>,
     retired_sounds: CommandReceiver<Arc<[f32]>>,
     mixer_commands: CommandSender<MixerCommand>,
+    monitor: MonitorOutput,
     status: Arc<Mutex<EngineStatus>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -99,8 +116,10 @@ pub struct AudioEngine {
 impl AudioEngine {
     pub fn start(device_id: Option<String>) -> Result<Self, EngineError> {
         let (engine_commands, engine_receiver) = bounded_command_queue(COMMAND_CAPACITY);
-        let (retired_sender, retired_sounds) = bounded_command_queue(COMMAND_CAPACITY);
+        let (retired_sender, retired_sounds) = bounded_command_queue(COMMAND_CAPACITY * 16);
         let (mixer_commands, mixer_receiver) = bounded_command_queue(COMMAND_CAPACITY);
+        let monitor = MonitorOutput::start().map_err(|_| EngineError::ThreadStart)?;
+        let monitor_producer = monitor.producer();
         let status = Arc::new(Mutex::new(EngineStatus::starting(device_id.clone())));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
@@ -115,6 +134,7 @@ impl AudioEngine {
                     engine_receiver,
                     retired_sender,
                     mixer_receiver,
+                    monitor_producer,
                     thread_status,
                     thread_stop,
                 );
@@ -135,6 +155,7 @@ impl AudioEngine {
                 engine_commands,
                 retired_sounds,
                 mixer_commands,
+                monitor,
                 status,
                 stop,
                 thread: Some(audio_thread),
@@ -157,33 +178,77 @@ impl AudioEngine {
         Ok(())
     }
 
-    pub fn play_sound(&self, samples: Arc<[f32]>) -> Result<(), EngineError> {
+    pub fn trigger_sound(
+        &self,
+        id: PlaybackId,
+        samples: Arc<[f32]>,
+        gain: f32,
+        policy: ReplayPolicy,
+    ) -> Result<(), EngineError> {
         if samples.is_empty() || !samples.len().is_multiple_of(CHANNELS as usize) {
             return Err(EngineError::InvalidSoundBuffer);
         }
+        if !gain.is_finite() || !(0.0..=2.0).contains(&gain) {
+            return Err(EngineError::InvalidSoundGain);
+        }
         self.drain_retired_sounds();
-        self.engine_commands
-            .try_send(EngineCommand::PlaySound(samples))?;
+        self.engine_commands.try_send(EngineCommand::TriggerSound {
+            id,
+            samples,
+            gain,
+            policy,
+        })?;
         Ok(())
     }
 
-    pub fn stop_sound(&self) -> Result<(), EngineError> {
+    pub fn stop_all_sounds(&self) -> Result<(), EngineError> {
         self.drain_retired_sounds();
-        self.engine_commands.try_send(EngineCommand::StopSound)?;
+        self.engine_commands
+            .try_send(EngineCommand::StopAllSounds)?;
         Ok(())
     }
 
     pub fn send_mixer_command(&self, command: MixerCommand) -> Result<(), EngineError> {
         self.mixer_commands.try_send(command)?;
+        match command {
+            MixerCommand::SetGain {
+                bus: MixBus::Soundboard,
+                gain,
+            } => self.monitor.set_master_gain(gain),
+            MixerCommand::SetMuted {
+                bus: MixBus::Soundboard,
+                muted,
+            } => self.monitor.set_master_muted(muted),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn set_monitor_enabled(&self, enabled: bool) {
+        self.monitor.set_enabled(enabled);
+    }
+
+    pub fn set_monitor_muted(&self, muted: bool) {
+        self.monitor.set_muted(muted);
+    }
+
+    pub fn set_monitor_gain(&self, gain: f32) -> Result<(), EngineError> {
+        if !gain.is_finite() || !(0.0..=2.0).contains(&gain) {
+            return Err(EngineError::InvalidSoundGain);
+        }
+        self.monitor.set_gain(gain);
         Ok(())
     }
 
     pub fn status(&self) -> EngineStatus {
         self.drain_retired_sounds();
-        self.status
+        let mut status = self
+            .status
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .clone();
+        status.monitor = self.monitor.status();
+        status
     }
 
     fn drain_retired_sounds(&self) {
@@ -277,8 +342,9 @@ struct EngineRuntime {
     engine_commands: CommandReceiver<EngineCommand>,
     retired_sounds: CommandSender<Arc<[f32]>>,
     mixer: RealtimeMixer,
+    monitor: MonitorProducer,
     tone: ReferenceTone,
-    player: SoundboardPlayer,
+    player: PolyphonicPlayer,
     soundboard: Vec<f32>,
     mixed: Vec<f32>,
     silence: [f32; SILENCE_FRAMES * CHANNELS as usize],
@@ -294,6 +360,7 @@ impl EngineRuntime {
         engine_commands: CommandReceiver<EngineCommand>,
         retired_sounds: CommandSender<Arc<[f32]>>,
         mixer_commands: CommandReceiver<MixerCommand>,
+        monitor: MonitorProducer,
         status: Arc<Mutex<EngineStatus>>,
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Self, EngineError> {
@@ -308,8 +375,9 @@ impl EngineRuntime {
             engine_commands,
             retired_sounds,
             mixer: RealtimeMixer::new(CHANNELS as usize, mixer_commands),
+            monitor,
             tone: ReferenceTone::new(),
-            player: SoundboardPlayer::new(),
+            player: PolyphonicPlayer::new(),
             soundboard: vec![0.0; sample_capacity],
             mixed: vec![0.0; sample_capacity],
             silence: [0.0; SILENCE_FRAMES * CHANNELS as usize],
@@ -341,6 +409,7 @@ impl EngineRuntime {
     fn process_frames(&mut self, frames: usize) {
         let samples = frames * CHANNELS as usize;
         self.render_soundboard(samples);
+        self.monitor.push(&self.soundboard[..samples]);
         self.mixer.process(
             self.pipeline.output(frames),
             &self.soundboard[..samples],
@@ -352,6 +421,7 @@ impl EngineRuntime {
     fn process_recovery_silence(&mut self) {
         let samples = SILENCE_FRAMES * CHANNELS as usize;
         self.render_soundboard(samples);
+        self.monitor.push(&self.soundboard[..samples]);
         self.mixer.process(
             &self.silence,
             &self.soundboard[..samples],
@@ -404,14 +474,21 @@ impl EngineRuntime {
         while let Some(command) = self.engine_commands.try_receive() {
             match command {
                 EngineCommand::PlayReferenceTone => self.tone.trigger(880.0, 500, 0.2),
-                EngineCommand::PlaySound(samples) => {
-                    if let Some(retired) = self.player.start(samples) {
-                        let _ = self.retired_sounds.try_send(retired);
+                EngineCommand::TriggerSound {
+                    id,
+                    samples,
+                    gain,
+                    policy,
+                } => {
+                    let mut retired = self.player.trigger(id, samples, gain, policy);
+                    for buffer in retired.drain() {
+                        let _ = self.retired_sounds.try_send(buffer);
                     }
                 }
-                EngineCommand::StopSound => {
-                    if let Some(retired) = self.player.stop() {
-                        let _ = self.retired_sounds.try_send(retired);
+                EngineCommand::StopAllSounds => {
+                    let mut retired = self.player.stop_all();
+                    for buffer in retired.drain() {
+                        let _ = self.retired_sounds.try_send(buffer);
                     }
                 }
             }
@@ -419,8 +496,9 @@ impl EngineRuntime {
     }
 
     fn render_soundboard(&mut self, samples: usize) {
-        if let Some(retired) = self.player.render(&mut self.soundboard[..samples]) {
-            let _ = self.retired_sounds.try_send(retired);
+        let mut retired = self.player.render(&mut self.soundboard[..samples]);
+        for buffer in retired.drain() {
+            let _ = self.retired_sounds.try_send(buffer);
         }
         self.tone.render_additive(&mut self.soundboard[..samples]);
     }
@@ -436,6 +514,8 @@ impl EngineRuntime {
             status.ipc = Some(self.writer.health());
             status.playback_frames = self.player.played_frames();
             status.playback_total_frames = self.player.total_frames();
+            status.playback_paused = self.player.paused();
+            status.active_voices = self.player.active_voice_count();
         }
     }
 
@@ -463,60 +543,8 @@ impl EngineRuntime {
         status.ipc = Some(self.writer.health());
         status.playback_frames = self.player.played_frames();
         status.playback_total_frames = self.player.total_frames();
-    }
-}
-
-struct SoundboardPlayer {
-    active: Option<Arc<[f32]>>,
-    position: usize,
-    last_total_frames: u64,
-}
-
-impl SoundboardPlayer {
-    const fn new() -> Self {
-        Self {
-            active: None,
-            position: 0,
-            last_total_frames: 0,
-        }
-    }
-
-    fn start(&mut self, samples: Arc<[f32]>) -> Option<Arc<[f32]>> {
-        let previous = self.active.replace(samples);
-        self.position = 0;
-        self.last_total_frames = self
-            .active
-            .as_ref()
-            .map_or(0, |value| (value.len() / CHANNELS as usize) as u64);
-        previous
-    }
-
-    fn stop(&mut self) -> Option<Arc<[f32]>> {
-        self.position = 0;
-        self.last_total_frames = 0;
-        self.active.take()
-    }
-
-    fn render(&mut self, output: &mut [f32]) -> Option<Arc<[f32]>> {
-        output.fill(0.0);
-        let active = self.active.as_ref()?;
-        let remaining = active.len().saturating_sub(self.position);
-        let copied = remaining.min(output.len());
-        output[..copied].copy_from_slice(&active[self.position..self.position + copied]);
-        self.position += copied;
-        if self.position >= active.len() {
-            self.active.take()
-        } else {
-            None
-        }
-    }
-
-    fn played_frames(&self) -> u64 {
-        (self.position / CHANNELS as usize) as u64
-    }
-
-    const fn total_frames(&self) -> u64 {
-        self.last_total_frames
+        status.playback_paused = self.player.paused();
+        status.active_voices = self.player.active_voice_count();
     }
 }
 
@@ -640,20 +668,5 @@ mod tests {
         policy.succeeded();
         assert_eq!(policy.failures, 0);
         assert!(policy.ready(Instant::now()));
-    }
-
-    #[test]
-    fn soundboard_player_reports_progress_and_retires_completed_buffer() {
-        let mut player = SoundboardPlayer::new();
-        player.start(Arc::from(vec![0.25_f32; 8].into_boxed_slice()));
-        let mut first = [0.0; 4];
-        assert!(player.render(&mut first).is_none());
-        assert_eq!(first, [0.25; 4]);
-        assert_eq!(player.played_frames(), 2);
-        let mut second = [0.0; 6];
-        assert!(player.render(&mut second).is_some());
-        assert_eq!(&second[..4], &[0.25; 4]);
-        assert_eq!(&second[4..], &[0.0; 2]);
-        assert_eq!(player.played_frames(), 4);
     }
 }

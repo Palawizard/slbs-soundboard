@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
-import { LibrarySnapshot, Sound, Soundboard, loadLibrary, moveItem } from "./library";
+import { LibrarySnapshot, PlaybackProfile, Sound, Soundboard, loadLibrary, moveItem } from "./library";
+import { shortcutFromKeyboardEvent, shortcutLabel, useGlobalShortcuts } from "./shortcuts";
 
 type Page = "library" | "audio";
 type Microphone = { id: string; name: string; isDefault: boolean };
@@ -20,6 +21,17 @@ type AudioStatus = {
   underrunFrames: number;
   playbackFrames: number;
   playbackTotalFrames: number;
+  playbackPaused: boolean;
+  activeVoices: number;
+  monitorEnabled: boolean;
+  monitorMuted: boolean;
+  monitorGain: number;
+  monitorDeviceName: string | null;
+  monitorRestartCount: number;
+  monitorLastError: string | null;
+  monitorQueuedFrames: number;
+  monitorDroppedFrames: number;
+  monitorUnderrunFrames: number;
 };
 
 const stoppedStatus: AudioStatus = {
@@ -27,6 +39,10 @@ const stoppedStatus: AudioStatus = {
   restartCount: 0, lastError: null, peak: 0, clippedSamples: 0, queuedFrames: 0,
   overrunFrames: 0, underrunFrames: 0,
   playbackFrames: 0, playbackTotalFrames: 0,
+  playbackPaused: false, activeVoices: 0,
+  monitorEnabled: false, monitorMuted: false, monitorGain: 1, monitorDeviceName: null,
+  monitorRestartCount: 0, monitorLastError: null, monitorQueuedFrames: 0,
+  monitorDroppedFrames: 0, monitorUnderrunFrames: 0,
 };
 const statusLabels: Record<AudioStatus["state"], string> = {
   starting: "Démarrage", running: "Actif", recovering: "Reconnexion", stopped: "Arrêté",
@@ -75,19 +91,55 @@ type SoundCardProps = {
   busy: boolean;
   playing: boolean;
   progress: number;
+  paused: boolean;
   onPlay: (sound: Sound) => void;
   onRename: (sound: Sound) => void;
   onImage: (sound: Sound) => void;
   onDelete: (sound: Sound) => void;
   onMove: (from: number, to: number) => void;
+  onProfile: (sound: Sound, profile: PlaybackProfile, preview: boolean) => void;
+  shortcutOwner: (shortcut: string, soundId: string) => string | null;
 };
 
-function SoundCard({ sound, index, total, busy, playing, progress, onPlay, onRename, onImage, onDelete, onMove }: SoundCardProps) {
+const replayLabels = { overlap: "Superposer", toggle: "Pause ou reprendre", stop: "Arrêter", restart: "Recommencer" } as const;
+
+function SoundCard({ sound, index, total, busy, playing, progress, paused, onPlay, onRename, onImage, onDelete, onMove, onProfile, shortcutOwner }: SoundCardProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [capturingShortcut, setCapturingShortcut] = useState(false);
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const [draft, setDraft] = useState(sound.playback);
+  useEffect(() => setDraft(sound.playback), [sound.playback]);
+  useEffect(() => {
+    if (!settingsOpen || draft === sound.playback) return;
+    const preview = draft.volume !== sound.playback.volume
+      || draft.pitchSemitones !== sound.playback.pitchSemitones
+      || draft.speed !== sound.playback.speed
+      || draft.replayPolicy !== sound.playback.replayPolicy;
+    const timer = window.setTimeout(() => onProfile(sound, draft, preview), 400);
+    return () => window.clearTimeout(timer);
+  }, [draft, settingsOpen, sound, onProfile]);
+  const updateDraft = (next: Partial<PlaybackProfile>) => setDraft((current) => ({ ...current, ...next }));
+  const captureShortcut = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!capturingShortcut) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.code === "Escape") { setCapturingShortcut(false); setShortcutError(null); return; }
+    if (event.code === "Backspace" || event.code === "Delete") {
+      updateDraft({ keybind: null }); setCapturingShortcut(false); setShortcutError(null); return;
+    }
+    const shortcut = shortcutFromKeyboardEvent(event.nativeEvent);
+    if (!shortcut) { setShortcutError("Utilisez au moins Ctrl, Alt, Maj ou Windows avec une touche prise en charge."); return; }
+    const owner = shortcutOwner(shortcut, sound.id);
+    if (owner) { setShortcutError(`Ce raccourci est déjà utilisé par « ${owner} ».`); return; }
+    updateDraft({ keybind: shortcut });
+    setCapturingShortcut(false);
+    setShortcutError(null);
+  };
   return (
     <article className="sound-card">
       <button className="sound-trigger" type="button" onClick={() => onPlay(sound)} disabled={busy} aria-label={`Jouer ${sound.title}`}>
         <SoundArtwork sound={sound} />
-        <span className="play-mark" aria-hidden="true">▶</span>
+        <span className="play-mark" aria-hidden="true">{playing && paused ? "Ⅱ" : "▶"}</span>
       </button>
       <div className="sound-copy">
         <strong title={sound.title}>{sound.title}</strong>
@@ -99,8 +151,18 @@ function SoundCard({ sound, index, total, busy, playing, progress, onPlay, onRen
         <button type="button" onClick={() => onMove(index, index + 1)} disabled={busy || index === total - 1} title="Déplacer après">→</button>
         <button type="button" onClick={() => onImage(sound)} disabled={busy} title="Choisir une image">Image</button>
         <button type="button" onClick={() => onRename(sound)} disabled={busy} title="Renommer">Renommer</button>
+        <button type="button" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)} disabled={busy}>Réglages</button>
         <button className="delete-action" type="button" onClick={() => onDelete(sound)} disabled={busy} title="Supprimer">Supprimer</button>
       </div>
+      {settingsOpen && <div className="sound-settings" aria-label={`Réglages de ${sound.title}`}>
+        <label>Volume <output>{Math.round(draft.volume * 100)} %</output><input type="range" min="0" max="2" step="0.05" value={draft.volume} onChange={(event) => updateDraft({ volume: Number(event.target.value) })} /></label>
+        <label>Hauteur <output>{draft.pitchSemitones > 0 ? "+" : ""}{draft.pitchSemitones} demi-ton{Math.abs(draft.pitchSemitones) > 1 ? "s" : ""}</output><input type="range" min="-12" max="12" step="1" value={draft.pitchSemitones} onChange={(event) => updateDraft({ pitchSemitones: Number(event.target.value) })} /></label>
+        <label>Vitesse <output>{draft.speed.toFixed(2)}×</output><input type="range" min="0.5" max="2" step="0.05" value={draft.speed} onChange={(event) => updateDraft({ speed: Number(event.target.value) })} /></label>
+        <label>Au second appui<select value={draft.replayPolicy} onChange={(event) => updateDraft({ replayPolicy: event.target.value as PlaybackProfile["replayPolicy"] })}>{Object.entries(replayLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <div className="shortcut-setting"><span>Raccourci global</span><kbd>{capturingShortcut ? "Appuyez sur les touches…" : shortcutLabel(draft.keybind)}</kbd><div><button type="button" className="shortcut-capture" onClick={() => { setCapturingShortcut(true); setShortcutError(null); }} onKeyDown={captureShortcut}>{capturingShortcut ? "Écoute…" : "Définir"}</button>{draft.keybind && <button type="button" onClick={() => updateDraft({ keybind: null })}>Effacer</button>}</div></div>
+        {shortcutError && <p className="settings-error" role="alert">{shortcutError}</p>}
+        <p className="settings-hint" role="status">Les changements sont enregistrés et joués automatiquement.</p>
+      </div>}
     </article>
   );
 }
@@ -112,7 +174,9 @@ function LibraryPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [playing, setPlaying] = useState<{ id: string; totalFrames: number; progress: number } | null>(null);
+  const [playing, setPlaying] = useState<{ id: string; totalFrames: number; progress: number; paused: boolean } | null>(null);
+  const reportShortcutError = useCallback((message: string) => setError(message), []);
+  useGlobalShortcuts(snapshot.soundboards, reportShortcutError);
 
   const refresh = useCallback(async (preferredId?: string) => {
     const next = await loadLibrary();
@@ -129,10 +193,11 @@ function LibraryPage() {
     if (!playing) return;
     const timer = window.setInterval(() => {
       void invoke<AudioStatus>("audio_status").then((status) => {
+        if (status.playbackTotalFrames === 0) { setPlaying(null); return; }
         if (status.playbackTotalFrames !== playing.totalFrames) return;
         const progress = Math.min(1, status.playbackFrames / Math.max(1, playing.totalFrames));
         if (progress >= 1) setPlaying(null);
-        else setPlaying((current) => current?.id === playing.id ? { ...current, progress } : current);
+        else setPlaying((current) => current?.id === playing.id ? { ...current, progress, paused: status.playbackPaused } : current);
       }).catch((reason: unknown) => { setError(String(reason)); setPlaying(null); });
     }, 120);
     return () => window.clearInterval(timer);
@@ -210,10 +275,33 @@ function LibraryPage() {
     setError(null);
     try {
       const totalFrames = await invoke<number>("play_sound", { soundId: sound.id });
-      setPlaying({ id: sound.id, totalFrames, progress: 0 });
+      setPlaying({ id: sound.id, totalFrames, progress: 0, paused: false });
     } catch (reason) {
       setError(String(reason));
     }
+  }
+
+  const updateProfile = useCallback(async (sound: Sound, profile: PlaybackProfile, preview: boolean) => {
+    setError(null);
+    try {
+      await invoke("update_playback_profile", { soundId: sound.id, profile });
+      setSnapshot((current) => ({ ...current, soundboards: current.soundboards.map((board) => ({ ...board, sounds: board.sounds.map((item) => item.id === sound.id ? { ...item, playback: profile } : item) })) }));
+      if (preview) {
+        const totalFrames = await invoke<number>("play_sound", { soundId: sound.id });
+        setPlaying({ id: sound.id, totalFrames, progress: 0, paused: false });
+      }
+    } catch (reason) { setError(String(reason)); }
+  }, []);
+
+  const shortcutOwner = useCallback((shortcut: string, soundId: string) => {
+    const owner = snapshot.soundboards.flatMap((board) => board.sounds)
+      .find((sound) => sound.id !== soundId && sound.playback.keybind?.toLowerCase() === shortcut.toLowerCase());
+    return owner?.title ?? null;
+  }, [snapshot.soundboards]);
+
+  async function stopPlayback() {
+    try { await invoke("stop_all_sounds"); setPlaying(null); }
+    catch (reason) { setError(String(reason)); }
   }
 
   return (
@@ -242,13 +330,13 @@ function LibraryPage() {
       <section className="library-content">
         <header className="library-header">
           <div><p className="eyebrow">Soundboard</p><h1>{selected?.title ?? "Mes sons"}</h1><p>{selected?.sounds.length ?? 0} son{selected?.sounds.length === 1 ? "" : "s"}</p></div>
-          <button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>{busy ? "Patientez…" : "Ajouter des sons"}</button>
+          <div className="header-actions"><button className="secondary-button" type="button" onClick={stopPlayback} disabled={!playing}>Tout arrêter</button><button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>{busy ? "Patientez…" : "Ajouter des sons"}</button></div>
         </header>
         {notice && <p className="notice-message" role="status">{notice}</p>}
         {error && <p className="error-message" role="alert">{error}</p>}
         {selected && selected.sounds.length > 0 ? (
           <div className="sound-grid">
-            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} playing={playing?.id === sound.id} progress={playing?.id === sound.id ? playing.progress : 0} onPlay={playSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} />)}
+            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} playing={playing?.id === sound.id} progress={playing?.id === sound.id ? playing.progress : 0} paused={playing?.id === sound.id ? playing.paused : false} onPlay={playSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} onProfile={updateProfile} shortcutOwner={shortcutOwner} />)}
           </div>
         ) : (
           <div className="empty-state"><div className="empty-icon" aria-hidden="true">♪</div><h2>Votre soundboard est vide</h2><p>Ajoutez vos premiers sons pour les retrouver ici.</p><button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>Choisir des sons</button></div>
@@ -258,24 +346,51 @@ function LibraryPage() {
   );
 }
 
+type MixControlBus = "microphone" | "soundboard" | "master";
+
 function AudioPage() {
   const [microphones, setMicrophones] = useState<Microphone[]>([]); const [selectedId, setSelectedId] = useState("");
   const [status, setStatus] = useState<AudioStatus>(stoppedStatus); const [busy, setBusy] = useState(false);
-  const [muted, setMuted] = useState(false); const [error, setError] = useState<string | null>(null);
+  const [levels, setLevels] = useState<Record<MixControlBus, number>>({ microphone: 1, soundboard: 1, master: 1 });
+  const [mutes, setMutes] = useState<Record<MixControlBus, boolean>>({ microphone: false, soundboard: false, master: false });
+  const [monitorEnabled, setMonitorEnabled] = useState(false); const [monitorMuted, setMonitorMuted] = useState(false); const [monitorGain, setMonitorGain] = useState(1);
+  const [error, setError] = useState<string | null>(null);
   const isRunning = status.state === "running" || status.state === "recovering";
   const selectedMicrophone = microphones.find((microphone) => microphone.id === selectedId);
   useEffect(() => { void invoke<Microphone[]>("list_microphones").then((devices) => { setMicrophones(devices); setSelectedId((devices.find((device) => device.isDefault) ?? devices[0])?.id ?? ""); }).catch((reason: unknown) => setError(String(reason))); }, []);
   useEffect(() => { const refresh = () => void invoke<AudioStatus>("audio_status").then(setStatus).catch((reason: unknown) => setError(String(reason))); refresh(); const timer = window.setInterval(refresh, 500); return () => window.clearInterval(timer); }, []);
-  async function startAudio() { if (!selectedId) return; setBusy(true); setError(null); try { await invoke("start_audio", { deviceId: selectedId }); setStatus(await invoke<AudioStatus>("audio_status")); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } }
-  async function stopAudio() { setBusy(true); try { await invoke("stop_audio"); setStatus(stoppedStatus); setMuted(false); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } }
-  async function toggleMute() { try { await invoke("set_microphone_muted", { muted: !muted }); setMuted(!muted); } catch (reason) { setError(String(reason)); } }
+  async function startAudio() {
+    if (!selectedId) return; setBusy(true); setError(null);
+    try {
+      await invoke("start_audio", { deviceId: selectedId });
+      for (const bus of ["microphone", "soundboard", "master"] as const) {
+        await invoke("set_master_gain", { bus, gain: levels[bus] });
+        await invoke("set_master_muted", { bus, muted: mutes[bus] });
+      }
+      await invoke("set_monitor_gain", { gain: monitorGain });
+      await invoke("set_monitor_muted", { muted: monitorMuted });
+      await invoke("set_monitoring", { enabled: monitorEnabled });
+      setStatus(await invoke<AudioStatus>("audio_status"));
+    } catch (reason) { setError(String(reason)); } finally { setBusy(false); }
+  }
+  async function stopAudio() { setBusy(true); try { await invoke("stop_audio"); setStatus(stoppedStatus); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } }
+  async function changeLevel(bus: MixControlBus, gain: number) { setLevels((current) => ({ ...current, [bus]: gain })); if (isRunning) try { await invoke("set_master_gain", { bus, gain }); } catch (reason) { setError(String(reason)); } }
+  async function toggleBusMute(bus: MixControlBus) { const muted = !mutes[bus]; setMutes((current) => ({ ...current, [bus]: muted })); if (isRunning) try { await invoke("set_master_muted", { bus, muted }); } catch (reason) { setError(String(reason)); } }
+  async function toggleMonitoring() { const enabled = !monitorEnabled; try { await invoke("set_monitoring", { enabled }); setMonitorEnabled(enabled); } catch (reason) { setError(String(reason)); } }
+  async function changeMonitorGain(gain: number) { setMonitorGain(gain); if (isRunning) try { await invoke("set_monitor_gain", { gain }); } catch (reason) { setError(String(reason)); } }
+  async function toggleMonitorMute() { const muted = !monitorMuted; try { await invoke("set_monitor_muted", { muted }); setMonitorMuted(muted); } catch (reason) { setError(String(reason)); } }
   return (
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">Chemin audio</p><h1>Microphone virtuel</h1></div><span className={`status status-${status.state}`}><span className="status-dot" />{statusLabels[status.state]}</span></header>
       <section className="audio-panel" aria-labelledby="audio-title"><div className="panel-copy"><p className="eyebrow">Source physique</p><h2 id="audio-title">Choisissez votre microphone</h2><p>Votre voix et les sons seront réunis dans « SLB Virtual Microphone ».</p></div>
         <label className="field-label" htmlFor="microphone-select">Microphone d’entrée</label><select id="microphone-select" value={selectedId} onChange={(event) => setSelectedId(event.target.value)} disabled={isRunning || busy}>{microphones.length === 0 && <option value="">Aucun microphone détecté</option>}{microphones.map((microphone) => <option key={microphone.id} value={microphone.id}>{microphone.name}{microphone.isDefault ? " — par défaut" : ""}</option>)}</select>
-        <div className="actions">{!isRunning ? <button className="primary-button" type="button" onClick={startAudio} disabled={!selectedId || busy}>{busy ? "Démarrage…" : "Démarrer"}</button> : <button className="danger-button" type="button" onClick={stopAudio} disabled={busy}>Arrêter</button>}<button className="secondary-button" type="button" onClick={toggleMute} disabled={!isRunning}>{muted ? "Réactiver ma voix" : "Couper ma voix"}</button><button className="secondary-button" type="button" onClick={() => invoke("play_reference_sound")} disabled={!isRunning}>Jouer le son test</button></div>
+        <div className="actions">{!isRunning ? <button className="primary-button" type="button" onClick={startAudio} disabled={!selectedId || busy}>{busy ? "Démarrage…" : "Démarrer"}</button> : <button className="danger-button" type="button" onClick={stopAudio} disabled={busy}>Arrêter</button>}<button className="secondary-button" type="button" onClick={() => void invoke("play_reference_sound").catch((reason: unknown) => setError(String(reason)))} disabled={!isRunning}>Jouer le son test</button></div>
         <div className="signal-card"><div><span className="signal-label">Entrée</span><strong>{selectedMicrophone?.name ?? "Non sélectionnée"}</strong></div><div className="route-line"><span /></div><div><span className="signal-label">Sortie</span><strong>SLB Virtual Microphone</strong></div></div>
-        {isRunning && <dl className="metrics"><div><dt>Format</dt><dd>{status.inputSampleRate ? `${status.inputSampleRate / 1000} kHz` : "—"}</dd></div><div><dt>Niveau</dt><dd>{Math.round(status.peak * 100)} %</dd></div><div><dt>File audio</dt><dd>{status.queuedFrames} trames</dd></div><div><dt>Reconnexions</dt><dd>{status.restartCount}</dd></div></dl>}{(error || status.lastError) && <p className="error-message" role="alert">{error ?? status.lastError}</p>}
+        <section className="mix-controls" aria-labelledby="mix-controls-title"><div className="mix-heading"><div><p className="eyebrow">Mixage</p><h2 id="mix-controls-title">Niveaux maîtres</h2></div><span>{Math.round(status.peak * 100)} %</span></div>
+          {(["microphone", "soundboard", "master"] as const).map((bus) => <div className="mix-row" key={bus}><label htmlFor={`gain-${bus}`}>{bus === "microphone" ? "Microphone" : bus === "soundboard" ? "Sons" : "Sortie virtuelle"}</label><input id={`gain-${bus}`} type="range" min="0" max="2" step="0.05" value={levels[bus]} onChange={(event) => void changeLevel(bus, Number(event.target.value))} /><output>{Math.round(levels[bus] * 100)} %</output><button type="button" onClick={() => void toggleBusMute(bus)} disabled={!isRunning}>{mutes[bus] ? "Réactiver" : "Couper"}</button></div>)}
+          <div className="monitor-control"><div><strong>Écoute locale des sons</strong><span>{status.monitorDeviceName ?? "Sortie par défaut"}{status.monitorRestartCount > 0 ? ` · ${status.monitorRestartCount} reconnexion${status.monitorRestartCount > 1 ? "s" : ""}` : ""}</span></div><button className="secondary-button" type="button" onClick={toggleMonitoring} disabled={!isRunning}>{monitorEnabled ? "Désactiver" : "Activer"}</button></div>
+          <div className="mix-row"><label htmlFor="monitor-gain">Volume d’écoute</label><input id="monitor-gain" type="range" min="0" max="2" step="0.05" value={monitorGain} onChange={(event) => void changeMonitorGain(Number(event.target.value))} /><output>{Math.round(monitorGain * 100)} %</output><button type="button" onClick={toggleMonitorMute} disabled={!isRunning || !monitorEnabled}>{monitorMuted ? "Réactiver" : "Couper"}</button></div>
+        </section>
+        {isRunning && <dl className="metrics"><div><dt>Format</dt><dd>{status.inputSampleRate ? `${status.inputSampleRate / 1000} kHz` : "—"}</dd></div><div><dt>Écrêtages</dt><dd>{status.clippedSamples}</dd></div><div><dt>File virtuelle</dt><dd>{status.queuedFrames} trames</dd></div><div><dt>Reconnexions</dt><dd>{status.restartCount}</dd></div></dl>}{(error || status.lastError || (monitorEnabled && status.monitorLastError)) && <p className="error-message" role="alert">{error ?? status.lastError ?? status.monitorLastError}</p>}
       </section></section>
   );
 }

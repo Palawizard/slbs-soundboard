@@ -6,8 +6,8 @@ mod service;
 use std::io;
 
 pub use db::{LibraryRepository, NewSound};
-pub use media::{DecodedAudio, MediaStore};
-pub use models::{MediaAsset, Sound, Soundboard};
+pub use media::MediaStore;
+pub use models::{MediaAsset, PlaybackProfile, ReplayPolicy, Sound, Soundboard};
 pub use service::LibraryService;
 use thiserror::Error;
 
@@ -35,4 +35,8 @@ pub enum LibraryError {
     ImageTooLarge,
     #[error("Les données audio sont invalides.")]
     AudioDecode,
+    #[error("Les réglages de lecture ne sont pas valides.")]
+    InvalidPlaybackProfile,
+    #[error("Ce raccourci est déjà associé à un autre son.")]
+    KeybindConflict,
 }

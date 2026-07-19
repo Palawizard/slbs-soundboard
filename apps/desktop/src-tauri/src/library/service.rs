@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
-    DecodedAudio, LibraryError, LibraryRepository, MediaStore, NewSound, Sound, Soundboard,
+    LibraryError, LibraryRepository, MediaStore, NewSound, PlaybackProfile, Sound, Soundboard,
 };
 
 pub struct LibraryService {
@@ -127,6 +127,15 @@ impl LibraryService {
         self.backup()
     }
 
+    pub fn update_playback_profile(
+        &mut self,
+        sound_id: &str,
+        profile: &PlaybackProfile,
+    ) -> Result<(), LibraryError> {
+        self.repository.update_playback_profile(sound_id, profile)?;
+        self.backup()
+    }
+
     pub fn remove_sound(
         &mut self,
         soundboard_id: &str,
@@ -148,7 +157,7 @@ impl LibraryService {
         self.backup()
     }
 
-    pub fn decode_sound(&self, sound_id: &str) -> Result<DecodedAudio, LibraryError> {
+    pub fn prepare_sound(&self, sound_id: &str) -> Result<(Sound, Vec<f32>), LibraryError> {
         let sound = self
             .repository
             .list_soundboards()?
@@ -156,8 +165,14 @@ impl LibraryService {
             .flat_map(|board| board.sounds)
             .find(|sound| sound.id == sound_id)
             .ok_or(LibraryError::NotFound)?;
-        self.media
-            .decode_asset(&sound.audio_hash, &sound.audio_extension)
+        let decoded = self
+            .media
+            .decode_asset(&sound.audio_hash, &sound.audio_extension)?;
+        let samples = decoded.into_engine_samples_with_profile(
+            sound.playback.pitch_semitones,
+            sound.playback.speed,
+        )?;
+        Ok((sound, samples))
     }
 
     pub fn image_data(&self, hash: &str) -> Result<(Vec<u8>, String), LibraryError> {

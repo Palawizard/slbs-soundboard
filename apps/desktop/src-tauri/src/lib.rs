@@ -1,16 +1,17 @@
+use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
 use base64::Engine as _;
 use serde::Serialize;
 use slb_audio_engine::{
-    AudioEngine, DeviceCatalog, EngineState, EngineStatus, MixBus, MixerCommand,
-    SystemDeviceCatalog,
+    AudioEngine, DeviceCatalog, EngineState, EngineStatus, MixBus, MixerCommand, PlaybackId,
+    ReplayPolicy as EngineReplayPolicy, SystemDeviceCatalog,
 };
 use tauri::{Manager, State};
 
 mod library;
 
-use library::{LibraryService, Sound, Soundboard};
+use library::{LibraryService, PlaybackProfile, ReplayPolicy, Sound, Soundboard};
 
 struct AudioAppState {
     engine: Mutex<Option<AudioEngine>>,
@@ -52,6 +53,17 @@ struct AudioStatusDto {
     underrun_frames: u64,
     playback_frames: u64,
     playback_total_frames: u64,
+    playback_paused: bool,
+    active_voices: usize,
+    monitor_enabled: bool,
+    monitor_muted: bool,
+    monitor_gain: f32,
+    monitor_device_name: Option<String>,
+    monitor_restart_count: u64,
+    monitor_last_error: Option<String>,
+    monitor_queued_frames: usize,
+    monitor_dropped_frames: u64,
+    monitor_underrun_frames: u64,
 }
 
 impl AudioStatusDto {
@@ -70,12 +82,24 @@ impl AudioStatusDto {
             underrun_frames: 0,
             playback_frames: 0,
             playback_total_frames: 0,
+            playback_paused: false,
+            active_voices: 0,
+            monitor_enabled: false,
+            monitor_muted: false,
+            monitor_gain: 1.0,
+            monitor_device_name: None,
+            monitor_restart_count: 0,
+            monitor_last_error: None,
+            monitor_queued_frames: 0,
+            monitor_dropped_frames: 0,
+            monitor_underrun_frames: 0,
         }
     }
 }
 
 impl From<EngineStatus> for AudioStatusDto {
     fn from(status: EngineStatus) -> Self {
+        let monitor = status.monitor;
         let ipc = status.ipc.unwrap_or(slb_audio_engine::IpcHealth {
             producer_active: false,
             queued_frames: 0,
@@ -103,6 +127,17 @@ impl From<EngineStatus> for AudioStatusDto {
             underrun_frames: ipc.underrun_frames,
             playback_frames: status.playback_frames,
             playback_total_frames: status.playback_total_frames,
+            playback_paused: status.playback_paused,
+            active_voices: status.active_voices,
+            monitor_enabled: monitor.enabled,
+            monitor_muted: monitor.muted,
+            monitor_gain: monitor.gain,
+            monitor_device_name: monitor.device_name,
+            monitor_restart_count: monitor.restart_count,
+            monitor_last_error: monitor.last_error,
+            monitor_queued_frames: monitor.queued_frames,
+            monitor_dropped_frames: monitor.dropped_frames,
+            monitor_underrun_frames: monitor.underrun_frames,
         }
     }
 }
@@ -190,6 +225,90 @@ fn set_microphone_muted(muted: bool, state: State<'_, AudioAppState>) -> Result<
         .map_err(|error| error.to_string())
 }
 
+fn mix_bus(bus: &str) -> Result<MixBus, String> {
+    match bus {
+        "microphone" => Ok(MixBus::Microphone),
+        "soundboard" => Ok(MixBus::Soundboard),
+        "master" => Ok(MixBus::Master),
+        _ => Err("Ce canal audio n’existe pas.".to_owned()),
+    }
+}
+
+#[tauri::command]
+fn set_master_gain(bus: String, gain: f32, state: State<'_, AudioAppState>) -> Result<(), String> {
+    if !gain.is_finite() || !(0.0..=2.0).contains(&gain) {
+        return Err("Le niveau demandé n’est pas valide.".to_owned());
+    }
+    let slot = state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
+    slot.as_ref()
+        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?
+        .send_mixer_command(MixerCommand::SetGain {
+            bus: mix_bus(&bus)?,
+            gain,
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_master_muted(
+    bus: String,
+    muted: bool,
+    state: State<'_, AudioAppState>,
+) -> Result<(), String> {
+    let slot = state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
+    slot.as_ref()
+        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?
+        .send_mixer_command(MixerCommand::SetMuted {
+            bus: mix_bus(&bus)?,
+            muted,
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_monitoring(enabled: bool, state: State<'_, AudioAppState>) -> Result<(), String> {
+    let slot = state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
+    let engine = slot
+        .as_ref()
+        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?;
+    engine.set_monitor_enabled(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_monitor_gain(gain: f32, state: State<'_, AudioAppState>) -> Result<(), String> {
+    let slot = state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
+    slot.as_ref()
+        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?
+        .set_monitor_gain(gain)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_monitor_muted(muted: bool, state: State<'_, AudioAppState>) -> Result<(), String> {
+    let slot = state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
+    let engine = slot
+        .as_ref()
+        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?;
+    engine.set_monitor_muted(muted);
+    Ok(())
+}
+
 fn with_library<T>(
     state: State<'_, LibraryAppState>,
     action: impl FnOnce(&mut LibraryService) -> Result<T, library::LibraryError>,
@@ -265,6 +384,17 @@ fn rename_sound(
 }
 
 #[tauri::command]
+fn update_playback_profile(
+    sound_id: String,
+    profile: PlaybackProfile,
+    state: State<'_, LibraryAppState>,
+) -> Result<(), String> {
+    with_library(state, |service| {
+        service.update_playback_profile(&sound_id, &profile)
+    })
+}
+
+#[tauri::command]
 fn set_sound_image(
     sound_id: String,
     path: String,
@@ -321,9 +451,7 @@ fn play_sound(
     library_state: State<'_, LibraryAppState>,
     audio_state: State<'_, AudioAppState>,
 ) -> Result<u64, String> {
-    let samples = with_library(library_state, |service| {
-        service.decode_sound(&sound_id)?.into_engine_samples()
-    })?;
+    let (sound, samples) = with_library(library_state, |service| service.prepare_sound(&sound_id))?;
     let total_frames = (samples.len() / slb_audio_engine::CHANNELS as usize) as u64;
     let mut slot = audio_state
         .engine
@@ -334,9 +462,39 @@ fn play_sound(
     }
     slot.as_ref()
         .expect("audio engine was initialized")
-        .play_sound(std::sync::Arc::from(samples.into_boxed_slice()))
+        .trigger_sound(
+            playback_id(&sound.id),
+            std::sync::Arc::from(samples.into_boxed_slice()),
+            sound.playback.volume,
+            match sound.playback.replay_policy {
+                ReplayPolicy::Overlap => EngineReplayPolicy::Overlap,
+                ReplayPolicy::Toggle => EngineReplayPolicy::Toggle,
+                ReplayPolicy::Stop => EngineReplayPolicy::Stop,
+                ReplayPolicy::Restart => EngineReplayPolicy::Restart,
+            },
+        )
         .map_err(|error| error.to_string())?;
     Ok(total_frames)
+}
+
+#[tauri::command]
+fn stop_all_sounds(audio_state: State<'_, AudioAppState>) -> Result<(), String> {
+    let slot = audio_state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
+    if let Some(engine) = slot.as_ref() {
+        engine
+            .stop_all_sounds()
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn playback_id(sound_id: &str) -> PlaybackId {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    sound_id.hash(&mut hasher);
+    PlaybackId(hasher.finish())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -346,6 +504,7 @@ pub fn run() {
             engine: Mutex::new(None),
         })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let root = app.path().app_data_dir()?;
@@ -361,6 +520,11 @@ pub fn run() {
             audio_status,
             play_reference_sound,
             set_microphone_muted,
+            set_master_gain,
+            set_master_muted,
+            set_monitoring,
+            set_monitor_gain,
+            set_monitor_muted,
             library_snapshot,
             select_soundboard,
             create_soundboard,
@@ -369,11 +533,13 @@ pub fn run() {
             reorder_soundboards,
             import_sound,
             rename_sound,
+            update_playback_profile,
             set_sound_image,
             delete_sound,
             reorder_sounds,
             sound_image_data,
             play_sound,
+            stop_all_sounds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
