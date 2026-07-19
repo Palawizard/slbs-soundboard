@@ -243,6 +243,8 @@ fn normalize_if_needed(samples: &mut [f32]) {
 mod tests {
     use std::f32::consts::TAU;
 
+    use proptest::prelude::*;
+
     use super::*;
 
     fn tone(frequency: f32, seconds: f32) -> Vec<f32> {
@@ -295,5 +297,31 @@ mod tests {
         let frequency = estimate_frequency(&output);
         assert!((frequency - 880.0).abs() < 24.0, "frequency {frequency}");
         assert!(output.iter().all(|sample| sample.abs() <= 0.98));
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(16))]
+
+        #[test]
+        fn every_safe_profile_produces_finite_bounded_audio(
+            pitch in -12_i8..=12,
+            speed_percent in 50_u16..=200,
+            frames in 64_usize..6_000,
+        ) {
+            let input: Vec<f32> = (0..frames)
+                .flat_map(|frame| {
+                    let sample = (TAU * 330.0 * frame as f32 / SAMPLE_RATE as f32).sin() * 0.8;
+                    [sample, -sample]
+                })
+                .collect();
+            let speed = speed_percent as f32 / 100.0;
+            let profile = PlaybackDspProfile::new(pitch as f32, speed).unwrap();
+            let output = process_playback_dsp(&input, profile).unwrap();
+            let expected_frames = (frames as f64 / speed as f64).round().max(1.0) as usize;
+
+            prop_assert_eq!(output.len(), expected_frames * CHANNELS as usize);
+            prop_assert!(output.iter().all(|sample| sample.is_finite()));
+            prop_assert!(output.iter().all(|sample| sample.abs() <= 0.981));
+        }
     }
 }

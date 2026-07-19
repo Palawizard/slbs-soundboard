@@ -236,6 +236,8 @@ impl PolyphonicPlayer {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
 
     fn sound(value: f32, frames: usize) -> Arc<[f32]> {
@@ -305,5 +307,34 @@ mod tests {
                 .flatten()
                 .any(|voice| voice.id == PlaybackId(0))
         );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn arbitrary_retrigger_sequences_preserve_player_invariants(actions in proptest::collection::vec(any::<u8>(), 1..96)) {
+            let mut player = PolyphonicPlayer::new();
+            let mut output = [0.0; 16];
+            for action in actions {
+                if action % 13 == 0 {
+                    player.stop_all();
+                } else {
+                    let policy = match action % 4 {
+                        0 => ReplayPolicy::Overlap,
+                        1 => ReplayPolicy::Toggle,
+                        2 => ReplayPolicy::Stop,
+                        _ => ReplayPolicy::Restart,
+                    };
+                    player.trigger(PlaybackId((action % 9) as u64), sound(0.05, 32), 1.0, policy);
+                }
+                if action % 3 == 0 {
+                    player.render(&mut output);
+                    prop_assert!(output.iter().all(|sample| sample.is_finite()));
+                }
+                prop_assert!(player.active_voice_count() <= MAX_ACTIVE_VOICES);
+                prop_assert!(player.played_frames() <= player.total_frames());
+            }
+        }
     }
 }

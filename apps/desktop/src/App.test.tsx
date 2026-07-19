@@ -53,10 +53,12 @@ describe("library interface", () => {
       if (command === "play_sound") return 60_000;
       return undefined;
     });
-    render(<App />);
+    const { unmount } = render(<App />);
     await waitFor(() => expect(register).toHaveBeenCalledWith(["Ctrl+Shift+K"], expect.any(Function)));
     const handler = vi.mocked(register).mock.calls[0][1];
     handler({ shortcut: "Ctrl+Shift+K", id: 1, state: "Pressed" });
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("play_sound", { soundId: "sound-1" }));
+    unmount();
+    await waitFor(() => expect(unregister).toHaveBeenCalledWith(["Ctrl+Shift+K"]));
   });
 });
