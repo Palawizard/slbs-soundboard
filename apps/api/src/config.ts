@@ -9,7 +9,7 @@ const environmentSchema = z.object({
   MEDIA_ROOT: z.string().min(1).default("./data/media"),
   PUBLIC_BASE_URL: z.string().url().default("http://127.0.0.1:3000"),
   GOOGLE_CLIENT_ID: z.string().min(1),
-  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.preprocess((value) => value === "" ? undefined : value, z.string().min(1).optional()),
   SESSION_SECRET: z.string().min(32),
   FFMPEG_PROBE_PATH: z.string().min(1).default("ffprobe"),
   FFMPEG_PATH: z.string().min(1).default("ffmpeg"),

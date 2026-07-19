@@ -63,8 +63,8 @@ export class PostgresCommunityRepository implements CommunityRepository {
         const username = await availableUsername(client, identity.name ?? "Utilisateur", identity.subject);
         const inserted = await client.query<DatabaseRow>(
           `INSERT INTO users(id, google_subject, email, username, username_key, avatar_url)
-           VALUES ($1, $2, $3, $4, lower($4), $5) RETURNING *`,
-          [randomUUID(), identity.subject, identity.email, username, identity.avatarUrl],
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+          [randomUUID(), identity.subject, identity.email, username, username.toLowerCase(), identity.avatarUrl],
         );
         row = required(inserted.rows[0]);
       }

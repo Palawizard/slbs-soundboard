@@ -39,7 +39,7 @@ export function buildServer(dependencies: ServerDependencies): FastifyInstance {
   const { config, repository, auth, media, publications, storage } = dependencies;
   const server = Fastify({ logger: config.environment !== "test", trustProxy: config.trustProxy, bodyLimit: MAX_SOUND_BYTES + 1024 * 1024, exposeHeadRoutes: false });
   server.register(rateLimit, { global: true, max: 120, timeWindow: "1 minute" });
-  server.register(multipart, { limits: { files: 1, fields: 0, parts: 1, fileSize: MAX_SOUND_BYTES } });
+  server.register(multipart, { limits: { files: 1, fields: 0, parts: 1, fileSize: MAX_SOUND_BYTES + 1 } });
 
   server.get("/health", async (_request, reply) => {
     const database = await repository.health();
@@ -75,7 +75,7 @@ export function buildServer(dependencies: ServerDependencies): FastifyInstance {
   for (const kind of ["audio", "image"] as const) {
     server.post(`/v1/media/${kind}`, { config: { rateLimit: { max: 20, timeWindow: "1 hour" } } }, async (request, reply) => {
       const user = await auth.authenticate(request.headers.authorization);
-      const part = await request.file({ limits: { files: 1, fields: 0, parts: 1, fileSize: kind === "audio" ? MAX_SOUND_BYTES : MAX_IMAGE_BYTES } });
+      const part = await request.file({ limits: { files: 1, fields: 0, parts: 1, fileSize: (kind === "audio" ? MAX_SOUND_BYTES : MAX_IMAGE_BYTES) + 1 } });
       if (!part) throw new DomainError("invalid", "Aucun fichier n’a été envoyé.");
       const uploaded = await media.upload(user.id, kind, part.file);
       if (part.file.truncated) throw new DomainError("invalid", "Ce fichier dépasse la taille autorisée.");
@@ -123,7 +123,7 @@ export function buildServer(dependencies: ServerDependencies): FastifyInstance {
     if (error instanceof RangeNotSatisfiableError) return reply.code(416).header("content-range", `bytes */${error.size}`).send(apiError("invalid_range", "La plage demandée n’est pas disponible.", request.id));
     if (error instanceof ZodError) return reply.code(400).send(apiError("invalid_request", "La requête n’est pas valide.", request.id));
     if (error instanceof DomainError) {
-      const status = { conflict: 409, forbidden: 403, not_found: 404, quota: 429, invalid: 422 }[error.code];
+      const status = { conflict: 409, forbidden: 403, unauthorized: 401, not_found: 404, quota: 429, invalid: 422 }[error.code];
       return reply.code(status).send(apiError(error.code, error.message, request.id));
     }
     if (typeof error === "object" && error !== null && "statusCode" in error && typeof error.statusCode === "number" && error.statusCode < 500) return reply.code(error.statusCode).send(apiError("invalid_upload", "Le fichier envoyé n’est pas valide.", request.id));

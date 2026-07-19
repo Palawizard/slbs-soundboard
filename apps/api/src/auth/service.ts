@@ -51,9 +51,9 @@ export class AuthService {
 
   async authenticate(header: string | undefined): Promise<UserRecord> {
     const match = header ? /^Bearer ([A-Za-z0-9_-]{43,128})$/.exec(header) : null;
-    if (!match?.[1]) throw new DomainError("forbidden", "Une connexion est requise.");
+    if (!match?.[1]) throw new DomainError("unauthorized", "Une connexion est requise.");
     const user = await this.repository.authenticateSession(keyedHash(this.sessionSecret, match[1]), this.now());
-    if (!user) throw new DomainError("forbidden", "La session est invalide ou expirée.");
+    if (!user) throw new DomainError("unauthorized", "La session est invalide ou expirée.");
     return user;
   }
 

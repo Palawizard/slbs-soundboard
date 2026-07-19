@@ -93,7 +93,7 @@ export interface CommunityRepository {
 
 export class DomainError extends Error {
   constructor(
-    public readonly code: "conflict" | "forbidden" | "not_found" | "quota" | "invalid",
+    public readonly code: "conflict" | "forbidden" | "unauthorized" | "not_found" | "quota" | "invalid",
     message: string,
   ) {
     super(message);
