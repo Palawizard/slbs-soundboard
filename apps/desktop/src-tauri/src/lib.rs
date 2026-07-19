@@ -7,6 +7,8 @@ use slb_audio_engine::{
 };
 use tauri::State;
 
+mod library;
+
 struct AudioAppState {
     engine: Mutex<Option<AudioEngine>>,
 }
