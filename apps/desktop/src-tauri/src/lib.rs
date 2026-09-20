@@ -218,9 +218,16 @@ struct OutputDeviceDto {
 
 /// Output devices the mix can be routed to. Loopback cables are listed first
 /// because they are the ones usable as a virtual microphone.
+///
+/// The enumeration runs on a thread of its own: `cpal` places the calling thread
+/// in a single-threaded COM apartment, Tauri reuses its command threads, and the
+/// WASAPI engine asks for the multi-threaded model on those same threads.
 #[tauri::command]
 fn list_output_devices() -> Vec<OutputDeviceDto> {
-    let mut devices: Vec<OutputDeviceDto> = output_device_names()
+    let names = std::thread::spawn(output_device_names)
+        .join()
+        .unwrap_or_default();
+    let mut devices: Vec<OutputDeviceDto> = names
         .into_iter()
         .map(|name| OutputDeviceDto {
             is_virtual_cable: is_virtual_cable(&name),
