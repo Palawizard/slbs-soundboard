@@ -31,12 +31,14 @@ Discord, dans vos jeux et dans tout logiciel de communication.
 1. Installez [VB-CABLE](https://vb-audio.com/Cable/), un logiciel gratuit
    (donationware) publié par VB-Audio.
 2. Dans l'onglet **Audio**, choisissez votre microphone, puis
-   `CABLE Input (VB-Audio Virtual Cable)` comme câble virtuel, et démarrez.
+   `CABLE Input (VB-Audio Virtual Cable)` comme câble virtuel.
 3. Dans Discord ou votre jeu, sélectionnez
    `CABLE Output (VB-Audio Virtual Cable)` comme microphone.
 
-Activez l'écoute locale pour vous entendre jouer les sons sans les renvoyer dans
-le câble.
+Le microphone est actif dès l'ouverture de l'application : il n'y a rien à
+démarrer. Vos sons sont aussi joués dans votre sortie audio habituelle pour que
+vous les entendiez en direct ; l'onglet **Audio** permet d'en régler le volume
+ou de couper cette écoute.
 
 Un pilote de capture noyau est présent dans `native/driver/`. Il exige une
 signature Microsoft pour être distribué, il n'est donc pas utilisé par défaut.
