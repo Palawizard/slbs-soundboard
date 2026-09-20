@@ -28,6 +28,7 @@ type AudioStatus = {
   playbackTotalFrames: number;
   playbackPaused: boolean;
   activeVoices: number;
+  activeSoundIds: string[];
   monitorEnabled: boolean;
   monitorMuted: boolean;
   monitorGain: number;
@@ -50,7 +51,7 @@ const stoppedStatus: AudioStatus = {
   restartCount: 0, lastError: null, peak: 0, clippedSamples: 0, queuedFrames: 0,
   overrunFrames: 0, underrunFrames: 0,
   playbackFrames: 0, playbackTotalFrames: 0,
-  playbackPaused: false, activeVoices: 0,
+  playbackPaused: false, activeVoices: 0, activeSoundIds: [],
   monitorEnabled: false, monitorMuted: false, monitorGain: 1, monitorDeviceName: null,
   monitorRestartCount: 0, monitorLastError: null, monitorQueuedFrames: 0,
   monitorDroppedFrames: 0, monitorUnderrunFrames: 0,
@@ -111,7 +112,7 @@ type SoundCardProps = {
   onImage: (sound: Sound) => void;
   onDelete: (sound: Sound) => void;
   onMove: (from: number, to: number) => void;
-  onProfile: (sound: Sound, profile: PlaybackProfile) => void;
+  onProfile: (sound: Sound, profile: PlaybackProfile, restart: boolean) => void;
   shortcutOwner: (shortcut: string, soundId: string) => string | null;
 };
 
@@ -125,9 +126,10 @@ function SoundCard({ sound, index, total, busy, playing, progress, paused, onPla
   useEffect(() => setDraft(sound.playback), [sound.playback]);
   useEffect(() => {
     if (!settingsOpen || draft === sound.playback) return;
-    const timer = window.setTimeout(() => onProfile(sound, draft), 400);
+    // A sound being listened to restarts with the new setting; a silent one waits.
+    const timer = window.setTimeout(() => onProfile(sound, draft, playing), 400);
     return () => window.clearTimeout(timer);
-  }, [draft, settingsOpen, sound, onProfile]);
+  }, [draft, settingsOpen, sound, onProfile, playing]);
   const updateDraft = (next: Partial<PlaybackProfile>) => setDraft((current) => ({ ...current, ...next }));
   const captureShortcut = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (!capturingShortcut) return;
@@ -147,10 +149,13 @@ function SoundCard({ sound, index, total, busy, playing, progress, paused, onPla
   };
   return (
     <article className="sound-card">
-      <button className="sound-trigger" type="button" onClick={() => onPlay(sound)} disabled={busy} aria-label={`Jouer ${sound.title}`}>
-        <SoundArtwork sound={sound} />
-        <span className="play-mark" aria-hidden="true">{playing && paused ? "Ⅱ" : "▶"}</span>
-      </button>
+      <div className="sound-preview">
+        <button className="sound-trigger" type="button" onClick={() => onPlay(sound)} disabled={busy} aria-label={`Jouer ${sound.title}`}>
+          <SoundArtwork sound={sound} />
+          <span className="play-mark" aria-hidden="true">{playing && paused ? "Ⅱ" : "▶"}</span>
+        </button>
+        <button className={`stop-mark ${playing ? "active" : ""}`} type="button" onClick={() => onStop(sound)} aria-label={`Arrêter ${sound.title}`} title="Arrêter ce son">■</button>
+      </div>
       <div className="sound-copy">
         <strong title={sound.title}>{sound.title}</strong>
         <span>{formatDuration(sound.durationMs)}</span>
@@ -159,7 +164,6 @@ function SoundCard({ sound, index, total, busy, playing, progress, paused, onPla
       <div className="card-actions" aria-label={`Actions pour ${sound.title}`}>
         <button type="button" onClick={() => onMove(index, index - 1)} disabled={busy || index === 0} title="Déplacer avant">←</button>
         <button type="button" onClick={() => onMove(index, index + 1)} disabled={busy || index === total - 1} title="Déplacer après">→</button>
-        <button type="button" onClick={() => onStop(sound)} disabled={!playing} title="Arrêter ce son">Arrêter</button>
         <button type="button" onClick={() => onImage(sound)} disabled={busy} title="Choisir une image">Image</button>
         <button type="button" onClick={() => onRename(sound)} disabled={busy} title="Renommer">Renommer</button>
         <button type="button" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)} disabled={busy}>Réglages</button>
@@ -172,7 +176,7 @@ function SoundCard({ sound, index, total, busy, playing, progress, paused, onPla
         <label>Au second appui<select value={draft.replayPolicy} onChange={(event) => updateDraft({ replayPolicy: event.target.value as PlaybackProfile["replayPolicy"] })}>{Object.entries(replayLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <div className="shortcut-setting"><span>Raccourci global</span><kbd>{capturingShortcut ? "Appuyez sur les touches…" : shortcutLabel(draft.keybind)}</kbd><div><button type="button" className="shortcut-capture" onClick={() => { setCapturingShortcut(true); setShortcutError(null); }} onKeyDown={captureShortcut}>{capturingShortcut ? "Écoute…" : "Définir"}</button>{draft.keybind && <button type="button" onClick={() => updateDraft({ keybind: null })}>Effacer</button>}</div></div>
         {shortcutError && <p className="settings-error" role="alert">{shortcutError}</p>}
-        <p className="settings-hint" role="status">Les changements sont enregistrés automatiquement. Utilisez le bouton de lecture pour écouter le résultat.</p>
+        <p className="settings-hint" role="status">Les changements sont enregistrés automatiquement. Si le son est en cours, il repart aussitôt avec le nouveau réglage.</p>
       </div>}
     </article>
   );
@@ -185,7 +189,8 @@ function LibraryPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [playing, setPlaying] = useState<{ id: string; totalFrames: number; progress: number; paused: boolean } | null>(null);
+  const [playing, setPlaying] = useState<{ id: string; totalFrames: number } | null>(null);
+  const [audio, setAudio] = useState<AudioStatus>(stoppedStatus);
   const reportShortcutError = useCallback((message: string) => setError(message), []);
   useGlobalShortcuts(snapshot.soundboards, reportShortcutError);
 
@@ -200,19 +205,17 @@ function LibraryPage() {
   }, []);
 
   useEffect(() => { void refresh().catch((reason: unknown) => setError(String(reason))); }, [refresh]);
+  // The engine names the sounds it plays, so keybinds and clicks share one truth.
   useEffect(() => {
-    if (!playing) return;
-    const timer = window.setInterval(() => {
-      void invoke<AudioStatus>("audio_status").then((status) => {
-        if (status.playbackTotalFrames === 0) { setPlaying(null); return; }
-        if (status.playbackTotalFrames !== playing.totalFrames) return;
-        const progress = Math.min(1, status.playbackFrames / Math.max(1, playing.totalFrames));
-        if (progress >= 1) setPlaying(null);
-        else setPlaying((current) => current?.id === playing.id ? { ...current, progress, paused: status.playbackPaused } : current);
-      }).catch((reason: unknown) => { setError(String(reason)); setPlaying(null); });
-    }, 120);
+    const refresh = () => void invoke<AudioStatus>("audio_status").then((value) => setAudio({ ...stoppedStatus, ...value })).catch(() => undefined);
+    refresh();
+    const timer = window.setInterval(refresh, 200);
     return () => window.clearInterval(timer);
-  }, [playing?.id, playing?.totalFrames]);
+  }, []);
+  const activeIds = useMemo(() => new Set(audio.activeSoundIds ?? []), [audio.activeSoundIds]);
+  useEffect(() => { if (playing && !activeIds.has(playing.id)) setPlaying(null); }, [activeIds, playing]);
+  const progress = playing && audio.playbackTotalFrames === playing.totalFrames
+    ? Math.min(1, audio.playbackFrames / Math.max(1, playing.totalFrames)) : 0;
   const selected = useMemo(() => snapshot.soundboards.find((board) => board.id === selectedId) ?? snapshot.soundboards[0], [snapshot.soundboards, selectedId]);
 
   async function run(action: () => Promise<unknown>, success?: string, preferredId?: string) {
@@ -286,17 +289,22 @@ function LibraryPage() {
     setError(null);
     try {
       const totalFrames = await invoke<number>("play_sound", { soundId: sound.id });
-      setPlaying({ id: sound.id, totalFrames, progress: 0, paused: false });
+      setPlaying({ id: sound.id, totalFrames });
     } catch (reason) {
       setError(String(reason));
     }
   }
 
-  const updateProfile = useCallback(async (sound: Sound, profile: PlaybackProfile) => {
+  const updateProfile = useCallback(async (sound: Sound, profile: PlaybackProfile, restart: boolean) => {
     setError(null);
     try {
       await invoke("update_playback_profile", { soundId: sound.id, profile });
       setSnapshot((current) => ({ ...current, soundboards: current.soundboards.map((board) => ({ ...board, sounds: board.sounds.map((item) => item.id === sound.id ? { ...item, playback: profile } : item) })) }));
+      if (restart) {
+        await invoke("stop_sound", { soundId: sound.id });
+        const totalFrames = await invoke<number>("play_sound", { soundId: sound.id });
+        setPlaying({ id: sound.id, totalFrames });
+      }
     } catch (reason) { setError(String(reason)); }
   }, []);
 
@@ -310,6 +318,8 @@ function LibraryPage() {
     try { await invoke("stop_sound", { soundId: sound.id }); setPlaying((current) => current?.id === sound.id ? null : current); }
     catch (reason) { setError(String(reason)); }
   }
+
+  // Panic button: always available, whatever the interface believes is playing.
 
   async function stopPlayback() {
     try { await invoke("stop_all_sounds"); setPlaying(null); }
@@ -342,13 +352,13 @@ function LibraryPage() {
       <section className="library-content">
         <header className="library-header">
           <div><p className="eyebrow">Soundboard</p><h1>{selected?.title ?? "Mes sons"}</h1><p>{selected?.sounds.length ?? 0} son{selected?.sounds.length === 1 ? "" : "s"}</p></div>
-          <div className="header-actions"><button className="secondary-button" type="button" onClick={stopPlayback} disabled={!playing}>Tout arrêter</button><button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>{busy ? "Patientez…" : "Ajouter des sons"}</button></div>
+          <div className="header-actions"><button className="secondary-button" type="button" onClick={stopPlayback}>Tout arrêter</button><button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>{busy ? "Patientez…" : "Ajouter des sons"}</button></div>
         </header>
         {notice && <p className="notice-message" role="status">{notice}</p>}
         {error && <p className="error-message" role="alert">{error}</p>}
         {selected && selected.sounds.length > 0 ? (
           <div className="sound-grid">
-            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} playing={playing?.id === sound.id} progress={playing?.id === sound.id ? playing.progress : 0} paused={playing?.id === sound.id ? playing.paused : false} onPlay={playSound} onStop={stopSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} onProfile={updateProfile} shortcutOwner={shortcutOwner} />)}
+            {selected.sounds.map((sound, index) => <SoundCard key={sound.id} sound={sound} index={index} total={selected.sounds.length} busy={busy} playing={activeIds.has(sound.id)} progress={playing?.id === sound.id ? progress : 0} paused={playing?.id === sound.id && audio.playbackPaused} onPlay={playSound} onStop={stopSound} onRename={renameSound} onImage={chooseImage} onDelete={deleteSound} onMove={moveSound} onProfile={updateProfile} shortcutOwner={shortcutOwner} />)}
           </div>
         ) : (
           <div className="empty-state"><div className="empty-icon" aria-hidden="true">♪</div><h2>Votre soundboard est vide</h2><p>Ajoutez vos premiers sons pour les retrouver ici.</p><button className="primary-button" type="button" onClick={importSounds} disabled={!selected || busy}>Choisir des sons</button></div>
@@ -359,13 +369,29 @@ function LibraryPage() {
 }
 
 type MixControlBus = "microphone" | "soundboard" | "master";
+type MixSettings = {
+  microphoneGain: number; microphoneMuted: boolean;
+  soundboardGain: number; soundboardMuted: boolean;
+  masterGain: number; masterMuted: boolean;
+  monitorEnabled: boolean; monitorGain: number; monitorMuted: boolean;
+};
+const defaultMix: MixSettings = {
+  microphoneGain: 1, microphoneMuted: false, soundboardGain: 1, soundboardMuted: false,
+  masterGain: 1, masterMuted: false, monitorEnabled: true, monitorGain: 1, monitorMuted: false,
+};
+const busLabels: Record<MixControlBus, string> = {
+  microphone: "Votre voix", soundboard: "Vos sons", master: "Volume envoyé",
+};
+const busKeys: Record<MixControlBus, { gain: keyof MixSettings; muted: keyof MixSettings }> = {
+  microphone: { gain: "microphoneGain", muted: "microphoneMuted" },
+  soundboard: { gain: "soundboardGain", muted: "soundboardMuted" },
+  master: { gain: "masterGain", muted: "masterMuted" },
+};
 
 function AudioPage() {
   const [microphones, setMicrophones] = useState<Microphone[]>([]); const [selectedId, setSelectedId] = useState("");
   const [status, setStatus] = useState<AudioStatus>(stoppedStatus); const [busy, setBusy] = useState(false);
-  const [levels, setLevels] = useState<Record<MixControlBus, number>>({ microphone: 1, soundboard: 1, master: 1 });
-  const [mutes, setMutes] = useState<Record<MixControlBus, boolean>>({ microphone: false, soundboard: false, master: false });
-  const [monitorEnabled, setMonitorEnabled] = useState(true); const [monitorMuted, setMonitorMuted] = useState(false); const [monitorGain, setMonitorGain] = useState(1);
+  const [mix, setMix] = useState<MixSettings>(defaultMix);
   const [outputs, setOutputs] = useState<OutputDevice[]>([]); const [virtualOutput, setVirtualOutput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const isRunning = status.state === "running" || status.state === "recovering";
@@ -382,6 +408,14 @@ function AudioPage() {
     } catch (reason) { setError(String(reason)); }
   }, []);
   useEffect(() => { void refreshOutputs(); }, [refreshOutputs]);
+  // The levels live in the library database, not in this component.
+  useEffect(() => { void invoke<MixSettings>("mix_settings").then((value) => setMix({ ...defaultMix, ...value })).catch((reason: unknown) => setError(String(reason))); }, []);
+  const changeMix = useCallback(async (patch: Partial<MixSettings>) => {
+    const next = { ...mix, ...patch };
+    setMix(next);
+    try { await invoke("set_mix_settings", { settings: next }); }
+    catch (reason) { setError(String(reason)); }
+  }, [mix]);
   async function changeVirtualOutput(name: string) {
     setVirtualOutput(name);
     try { await invoke("set_virtual_output_device", { device: name || null }); }
@@ -393,21 +427,9 @@ function AudioPage() {
     setSelectedId(deviceId); setBusy(true); setError(null);
     try {
       await invoke("start_audio", { deviceId: deviceId || null });
-      for (const bus of ["microphone", "soundboard", "master"] as const) {
-        await invoke("set_master_gain", { bus, gain: levels[bus] });
-        await invoke("set_master_muted", { bus, muted: mutes[bus] });
-      }
-      await invoke("set_monitor_gain", { gain: monitorGain });
-      await invoke("set_monitor_muted", { muted: monitorMuted });
-      await invoke("set_monitoring", { enabled: monitorEnabled });
       setStatus(await invoke<AudioStatus>("audio_status"));
     } catch (reason) { setError(String(reason)); } finally { setBusy(false); }
   }
-  async function changeLevel(bus: MixControlBus, gain: number) { setLevels((current) => ({ ...current, [bus]: gain })); if (isRunning) try { await invoke("set_master_gain", { bus, gain }); } catch (reason) { setError(String(reason)); } }
-  async function toggleBusMute(bus: MixControlBus) { const muted = !mutes[bus]; setMutes((current) => ({ ...current, [bus]: muted })); if (isRunning) try { await invoke("set_master_muted", { bus, muted }); } catch (reason) { setError(String(reason)); } }
-  async function toggleMonitoring() { const enabled = !monitorEnabled; try { await invoke("set_monitoring", { enabled }); setMonitorEnabled(enabled); } catch (reason) { setError(String(reason)); } }
-  async function changeMonitorGain(gain: number) { setMonitorGain(gain); if (isRunning) try { await invoke("set_monitor_gain", { gain }); } catch (reason) { setError(String(reason)); } }
-  async function toggleMonitorMute() { const muted = !monitorMuted; try { await invoke("set_monitor_muted", { muted }); setMonitorMuted(muted); } catch (reason) { setError(String(reason)); } }
   return (
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">Chemin audio</p><h1>Microphone virtuel</h1></div><span className={`status status-${status.state}`}><span className="status-dot" />{statusLabels[status.state]}</span></header>
       <section className="audio-panel" aria-labelledby="audio-title"><div className="panel-copy"><p className="eyebrow">Source physique</p><h2 id="audio-title">Choisissez votre microphone</h2><p>Votre micro est actif dès l’ouverture de l’application. Votre voix et les sons sont réunis, puis envoyés vers le câble virtuel que vous choisissez ci-dessous.</p></div>
@@ -430,12 +452,13 @@ function AudioPage() {
           <div className="routing-state"><span className={`status status-${status.virtualOutputConnected ? "running" : "stopped"}`}><span className="status-dot" />{status.virtualOutputConnected ? `Connecté à ${status.virtualOutputActiveDevice}` : "Non connecté"}</span>
             <button type="button" className="secondary-button" onClick={() => void refreshOutputs()}>Actualiser la liste</button></div>
         </section>
-        <section className="mix-controls" aria-labelledby="mix-controls-title"><div className="mix-heading"><div><p className="eyebrow">Mixage</p><h2 id="mix-controls-title">Niveaux maîtres</h2></div><span>{Math.round(status.peak * 100)} %</span></div>
-          {(["microphone", "soundboard", "master"] as const).map((bus) => <div className="mix-row" key={bus}><label htmlFor={`gain-${bus}`}>{bus === "microphone" ? "Microphone" : bus === "soundboard" ? "Sons" : "Sortie virtuelle"}</label><input id={`gain-${bus}`} type="range" min="0" max="2" step="0.05" value={levels[bus]} onChange={(event) => void changeLevel(bus, Number(event.target.value))} /><output>{Math.round(levels[bus] * 100)} %</output><button type="button" onClick={() => void toggleBusMute(bus)} disabled={!isRunning}>{mutes[bus] ? "Réactiver" : "Couper"}</button></div>)}
-          <div className="monitor-control"><div><strong>Écoute des sons dans vos écouteurs</strong><span>{status.monitorDeviceName ?? "Sortie par défaut"}{status.monitorRestartCount > 0 ? ` · ${status.monitorRestartCount} reconnexion${status.monitorRestartCount > 1 ? "s" : ""}` : ""}</span></div><button className="secondary-button" type="button" onClick={toggleMonitoring} disabled={!isRunning}>{monitorEnabled ? "Désactiver" : "Activer"}</button></div>
-          <div className="mix-row"><label htmlFor="monitor-gain">Volume d’écoute</label><input id="monitor-gain" type="range" min="0" max="2" step="0.05" value={monitorGain} onChange={(event) => void changeMonitorGain(Number(event.target.value))} /><output>{Math.round(monitorGain * 100)} %</output><button type="button" onClick={toggleMonitorMute} disabled={!isRunning || !monitorEnabled}>{monitorMuted ? "Réactiver" : "Couper"}</button></div>
+        <section className="mix-controls" aria-labelledby="mix-controls-title"><div className="mix-heading"><div><p className="eyebrow">Mixage</p><h2 id="mix-controls-title">Ce que vos interlocuteurs entendent</h2></div></div>
+          {(["microphone", "soundboard", "master"] as const).map((bus) => { const keys = busKeys[bus]; const gain = mix[keys.gain] as number; const muted = mix[keys.muted] as boolean; return <div className="mix-row" key={bus}><label htmlFor={`gain-${bus}`}>{busLabels[bus]}</label><input id={`gain-${bus}`} type="range" min="0" max="2" step="0.05" value={gain} onChange={(event) => void changeMix({ [keys.gain]: Number(event.target.value) })} /><output>{Math.round(gain * 100)} %</output><button type="button" onClick={() => void changeMix({ [keys.muted]: !muted })}>{muted ? "Réactiver" : "Couper"}</button></div>; })}
+          <div className="monitor-control"><div><strong>Écoute des sons dans vos écouteurs</strong><span>{status.monitorDeviceName ?? "Sortie par défaut"}{status.monitorRestartCount > 0 ? ` · ${status.monitorRestartCount} reconnexion${status.monitorRestartCount > 1 ? "s" : ""}` : ""}</span></div><button className="secondary-button" type="button" onClick={() => void changeMix({ monitorEnabled: !mix.monitorEnabled })}>{mix.monitorEnabled ? "Désactiver" : "Activer"}</button></div>
+          <div className="mix-row"><label htmlFor="monitor-gain">Volume d’écoute</label><input id="monitor-gain" type="range" min="0" max="2" step="0.05" value={mix.monitorGain} onChange={(event) => void changeMix({ monitorGain: Number(event.target.value) })} /><output>{Math.round(mix.monitorGain * 100)} %</output><button type="button" onClick={() => void changeMix({ monitorMuted: !mix.monitorMuted })} disabled={!mix.monitorEnabled}>{mix.monitorMuted ? "Réactiver" : "Couper"}</button></div>
+          <p className="settings-hint">Ces niveaux sont conservés. « Volume d’écoute » ne change que ce que vous entendez, jamais ce qui part dans vos appels.</p>
         </section>
-        {isRunning && <dl className="metrics"><div><dt>Format</dt><dd>{status.inputSampleRate ? `${status.inputSampleRate / 1000} kHz` : "—"}</dd></div><div><dt>Écrêtages</dt><dd>{status.clippedSamples}</dd></div><div><dt>File virtuelle</dt><dd>{status.queuedFrames} trames</dd></div><div><dt>Reconnexions</dt><dd>{status.restartCount}</dd></div></dl>}{(error || status.lastError || status.virtualOutputLastError || (monitorEnabled && status.monitorLastError)) && <p className="error-message" role="alert">{error ?? status.lastError ?? status.virtualOutputLastError ?? status.monitorLastError}</p>}
+        {isRunning && <dl className="metrics"><div><dt>Format</dt><dd>{status.inputSampleRate ? `${status.inputSampleRate / 1000} kHz` : "—"}</dd></div><div><dt>Écrêtages</dt><dd>{status.clippedSamples}</dd></div><div><dt>File virtuelle</dt><dd>{status.queuedFrames} trames</dd></div><div><dt>Reconnexions</dt><dd>{status.restartCount}</dd></div></dl>}{(error || status.lastError || status.virtualOutputLastError || (mix.monitorEnabled && status.monitorLastError)) && <p className="error-message" role="alert">{error ?? status.lastError ?? status.virtualOutputLastError ?? status.monitorLastError}</p>}
       </section></section>
   );
 }
