@@ -186,6 +186,46 @@ fn list_microphones() -> Result<Vec<MicrophoneDto>, String> {
         .map_err(|error| error.to_string())
 }
 
+/// Starts the engine, restores the persisted virtual-cable routing and turns
+/// local monitoring on so the user hears the sounds he triggers.
+fn launch_engine(
+    device_id: Option<String>,
+    library: &Mutex<LibraryService>,
+) -> Result<AudioEngine, String> {
+    let engine = AudioEngine::start(device_id).map_err(|error| error.to_string())?;
+    if let Ok(service) = library.lock() {
+        if let Ok(device) = service.virtual_output_device() {
+            engine.set_virtual_output_device(device);
+        }
+    }
+    engine.set_monitor_enabled(true);
+    Ok(engine)
+}
+
+/// Brings the engine up with the persisted capture device when it is not
+/// running yet, falling back to the system default when that device is gone.
+fn ensure_engine(
+    slot: &mut Option<AudioEngine>,
+    library: &Mutex<LibraryService>,
+) -> Result<(), String> {
+    if slot.is_some() {
+        return Ok(());
+    }
+    let device_id = library
+        .lock()
+        .ok()
+        .and_then(|service| service.input_device().ok())
+        .flatten();
+    let engine = match launch_engine(device_id.clone(), library) {
+        Ok(engine) => engine,
+        Err(error) if device_id.is_some() => launch_engine(None, library).map_err(|_| error)?,
+        Err(error) => return Err(error),
+    };
+    *slot = Some(engine);
+    Ok(())
+}
+
+/// Switches the capture device and remembers it for the next launch.
 #[tauri::command]
 fn start_audio(
     device_id: Option<String>,
@@ -199,13 +239,13 @@ fn start_audio(
     if let Some(mut engine) = slot.take() {
         engine.stop().map_err(|error| error.to_string())?;
     }
-    let engine = AudioEngine::start(device_id).map_err(|error| error.to_string())?;
-    if let Ok(service) = library.service.lock() {
-        if let Ok(device) = service.virtual_output_device() {
-            engine.set_virtual_output_device(device);
-        }
-    }
-    *slot = Some(engine);
+    library
+        .service
+        .lock()
+        .map_err(|_| "La bibliotheque est indisponible.".to_owned())?
+        .set_input_device(device_id.as_deref())
+        .map_err(|error| error.to_string())?;
+    *slot = Some(launch_engine(device_id, &library.service)?);
     Ok(())
 }
 
@@ -284,19 +324,6 @@ fn set_virtual_output_device(
         .as_ref()
     {
         engine.set_virtual_output_device(device);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn stop_audio(state: State<'_, AudioAppState>) -> Result<(), String> {
-    let engine = state
-        .engine
-        .lock()
-        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?
-        .take();
-    if let Some(mut engine) = engine {
-        engine.stop().map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -755,15 +782,14 @@ fn play_sound(
     library_state: State<'_, LibraryAppState>,
     audio_state: State<'_, AudioAppState>,
 ) -> Result<u64, String> {
-    let (sound, samples) = with_library(library_state, |service| service.prepare_sound(&sound_id))?;
+    let (sound, samples) =
+        with_library(library_state.clone(), |service| service.prepare_sound(&sound_id))?;
     let total_frames = (samples.len() / slb_audio_engine::CHANNELS as usize) as u64;
     let mut slot = audio_state
         .engine
         .lock()
         .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
-    if slot.is_none() {
-        *slot = Some(AudioEngine::start(None).map_err(|error| error.to_string())?);
-    }
+    ensure_engine(&mut slot, &library_state.service)?;
     slot.as_ref()
         .expect("audio engine was initialized")
         .trigger_sound(
@@ -823,12 +849,24 @@ pub fn run() {
                 client: community::CommunityClient::new(&root, diagnostics_enabled)
                     .map_err(std::io::Error::other)?,
             });
+            // The microphone is always live: opening a capture device can block,
+            // so it happens off the setup thread and never delays the window.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let audio = handle.state::<AudioAppState>();
+                let library = handle.state::<LibraryAppState>();
+                let Ok(mut slot) = audio.engine.lock() else {
+                    return;
+                };
+                if let Err(error) = ensure_engine(&mut slot, &library.service) {
+                    eprintln!("audio engine startup failed: {error}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_microphones,
             start_audio,
-            stop_audio,
             audio_status,
             play_reference_sound,
             set_microphone_muted,

@@ -216,6 +216,20 @@ impl LibraryService {
         self.backup()
     }
 
+    /// Capture device the engine reopens on launch, empty for the system default.
+    pub fn input_device(&self) -> Result<Option<String>, LibraryError> {
+        Ok(self
+            .repository
+            .setting("input_device")?
+            .filter(|value| !value.is_empty()))
+    }
+
+    pub fn set_input_device(&mut self, device: Option<&str>) -> Result<(), LibraryError> {
+        self.repository
+            .set_setting("input_device", device.unwrap_or_default())?;
+        self.backup()
+    }
+
     pub fn diagnostics_enabled(&self) -> Result<bool, LibraryError> {
         Ok(self.repository.setting("diagnostics_enabled")?.as_deref() != Some("false"))
     }
@@ -357,5 +371,22 @@ mod tests {
             .file_name()
             .to_string_lossy()
             .starts_with("library.corrupt.")));
+    }
+
+    #[test]
+    fn remembers_the_capture_device_across_sessions() {
+        let temporary = tempfile::tempdir().unwrap();
+        {
+            let mut service = LibraryService::open(temporary.path()).unwrap();
+            assert_eq!(service.input_device().unwrap(), None);
+            service.set_input_device(Some("microphone-1")).unwrap();
+        }
+        let mut service = LibraryService::open(temporary.path()).unwrap();
+        assert_eq!(
+            service.input_device().unwrap().as_deref(),
+            Some("microphone-1")
+        );
+        service.set_input_device(None).unwrap();
+        assert_eq!(service.input_device().unwrap(), None);
     }
 }
