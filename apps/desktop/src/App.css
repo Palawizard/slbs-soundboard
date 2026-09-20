@@ -52,6 +52,10 @@ h2 { font-size: 1.35rem; }
 .sound-artwork { width: 100%; height: 100%; object-fit: cover; }
 .fallback-artwork { display: grid; place-items: center; color: rgb(255 255 255 / 85%); font-size: 2.4rem; font-weight: 900; letter-spacing: -.08em; }
 .play-mark { position: absolute; right: 10px; bottom: 10px; display: grid; width: 34px; height: 34px; place-items: center; padding-left: 2px; border-radius: 50%; background: rgb(12 14 20 / 78%); box-shadow: 0 5px 18px rgb(0 0 0 / 30%); font-size: .75rem; }
+.sound-preview { position: relative; }
+.stop-mark { position: absolute; right: 52px; bottom: 10px; display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 50%; background: rgb(12 14 20 / 78%); box-shadow: 0 5px 18px rgb(0 0 0 / 30%); color: #d8dced; cursor: pointer; font-size: .7rem; }
+.stop-mark:hover { background: #3f222d; color: #ffb4c2; }
+.stop-mark.active { background: #b4485f; color: #fff; }
 .sound-copy { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 12px 4px 6px; }
 .sound-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sound-copy span { color: #8d94a6; font-size: .75rem; }
