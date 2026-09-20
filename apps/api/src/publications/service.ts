@@ -40,6 +40,10 @@ export class PublicationService {
     return communitySound(publication);
   }
 
+  async listOwned(userId: string): Promise<CommunitySound[]> {
+    return (await this.repository.listOwnedPublications(userId)).map(communitySound);
+  }
+
   async importMetadata(id: string): Promise<ImportMetadata> {
     const publication = await this.repository.findPublication(id);
     if (!publication) throw new DomainError("not_found", "Cette publication est introuvable.");

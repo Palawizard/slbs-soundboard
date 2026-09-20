@@ -59,6 +59,7 @@ pub struct Sound {
     pub waveform: Vec<f32>,
     pub playback: PlaybackProfile,
     pub created_at_ms: u64,
+    pub publication_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

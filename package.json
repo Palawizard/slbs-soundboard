@@ -11,10 +11,10 @@
     "dev:api": "npm run dev --workspace @slb/api",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "release:windows": "npm run release:windows --workspace @slb/desktop"
   },
   "engines": {
     "node": ">=22"
   }
 }
-

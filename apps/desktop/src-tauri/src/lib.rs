@@ -5,10 +5,12 @@ use base64::Engine as _;
 use serde::Serialize;
 use slb_audio_engine::{
     AudioEngine, DeviceCatalog, EngineState, EngineStatus, MixBus, MixerCommand, PlaybackId,
-    ReplayPolicy as EngineReplayPolicy, SystemDeviceCatalog,
+    ReplayPolicy as EngineReplayPolicy, SystemDeviceCatalog, is_virtual_cable, output_device_names,
 };
 use tauri::{Manager, State};
 
+mod community;
+mod driver;
 mod library;
 
 use library::{LibraryService, PlaybackProfile, ReplayPolicy, Sound, Soundboard};
@@ -19,6 +21,14 @@ struct AudioAppState {
 
 struct LibraryAppState {
     service: Mutex<LibraryService>,
+}
+
+struct CommunityAppState {
+    client: community::CommunityClient,
+}
+
+pub fn run_driver_cli_action(arguments: &[String]) -> Option<i32> {
+    driver::run_cli_action(arguments)
 }
 
 #[derive(Serialize)]
@@ -64,6 +74,11 @@ struct AudioStatusDto {
     monitor_queued_frames: usize,
     monitor_dropped_frames: u64,
     monitor_underrun_frames: u64,
+    virtual_output_device: Option<String>,
+    virtual_output_active_device: Option<String>,
+    virtual_output_connected: bool,
+    virtual_output_last_error: Option<String>,
+    virtual_output_dropped_frames: u64,
 }
 
 impl AudioStatusDto {
@@ -93,6 +108,11 @@ impl AudioStatusDto {
             monitor_queued_frames: 0,
             monitor_dropped_frames: 0,
             monitor_underrun_frames: 0,
+            virtual_output_device: None,
+            virtual_output_active_device: None,
+            virtual_output_connected: false,
+            virtual_output_last_error: None,
+            virtual_output_dropped_frames: 0,
         }
     }
 }
@@ -100,6 +120,7 @@ impl AudioStatusDto {
 impl From<EngineStatus> for AudioStatusDto {
     fn from(status: EngineStatus) -> Self {
         let monitor = status.monitor;
+        let virtual_sink = status.virtual_sink;
         let ipc = status.ipc.unwrap_or(slb_audio_engine::IpcHealth {
             producer_active: false,
             queued_frames: 0,
@@ -138,6 +159,11 @@ impl From<EngineStatus> for AudioStatusDto {
             monitor_queued_frames: monitor.queued_frames,
             monitor_dropped_frames: monitor.dropped_frames,
             monitor_underrun_frames: monitor.underrun_frames,
+            virtual_output_device: virtual_sink.requested_device,
+            virtual_output_active_device: virtual_sink.device_name,
+            virtual_output_connected: virtual_sink.connected,
+            virtual_output_last_error: virtual_sink.last_error,
+            virtual_output_dropped_frames: virtual_sink.dropped_frames,
         }
     }
 }
@@ -161,7 +187,11 @@ fn list_microphones() -> Result<Vec<MicrophoneDto>, String> {
 }
 
 #[tauri::command]
-fn start_audio(device_id: Option<String>, state: State<'_, AudioAppState>) -> Result<(), String> {
+fn start_audio(
+    device_id: Option<String>,
+    state: State<'_, AudioAppState>,
+    library: State<'_, LibraryAppState>,
+) -> Result<(), String> {
     let mut slot = state
         .engine
         .lock()
@@ -169,7 +199,85 @@ fn start_audio(device_id: Option<String>, state: State<'_, AudioAppState>) -> Re
     if let Some(mut engine) = slot.take() {
         engine.stop().map_err(|error| error.to_string())?;
     }
-    *slot = Some(AudioEngine::start(device_id).map_err(|error| error.to_string())?);
+    let engine = AudioEngine::start(device_id).map_err(|error| error.to_string())?;
+    if let Ok(service) = library.service.lock() {
+        if let Ok(device) = service.virtual_output_device() {
+            engine.set_virtual_output_device(device);
+        }
+    }
+    *slot = Some(engine);
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OutputDeviceDto {
+    name: String,
+    is_virtual_cable: bool,
+}
+
+/// Output devices the mix can be routed to. Loopback cables are listed first
+/// because they are the ones usable as a virtual microphone.
+#[tauri::command]
+fn list_output_devices() -> Vec<OutputDeviceDto> {
+    let mut devices: Vec<OutputDeviceDto> = output_device_names()
+        .into_iter()
+        .map(|name| OutputDeviceDto {
+            is_virtual_cable: is_virtual_cable(&name),
+            name,
+        })
+        .collect();
+    devices.sort_by(|left, right| {
+        right
+            .is_virtual_cable
+            .cmp(&left.is_virtual_cable)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    devices
+}
+
+/// Opens the VB-Audio download page in the system browser. VB-CABLE is
+/// donationware published by VB-Audio; the application only detects it.
+#[tauri::command]
+fn open_virtual_cable_download(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url("https://vb-audio.com/Cable/", None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn virtual_output_device(library: State<'_, LibraryAppState>) -> Result<Option<String>, String> {
+    library
+        .service
+        .lock()
+        .map_err(|_| "La bibliotheque est indisponible.".to_owned())?
+        .virtual_output_device()
+        .map_err(|error| error.to_string())
+}
+
+/// Persists the routing choice and applies it immediately when the engine runs.
+#[tauri::command]
+fn set_virtual_output_device(
+    device: Option<String>,
+    state: State<'_, AudioAppState>,
+    library: State<'_, LibraryAppState>,
+) -> Result<(), String> {
+    let device = device.filter(|value| !value.trim().is_empty());
+    library
+        .service
+        .lock()
+        .map_err(|_| "La bibliotheque est indisponible.".to_owned())?
+        .set_virtual_output_device(device.as_deref())
+        .map_err(|error| error.to_string())?;
+    if let Some(engine) = state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?
+        .as_ref()
+    {
+        engine.set_virtual_output_device(device);
+    }
     Ok(())
 }
 
@@ -446,6 +554,195 @@ fn sound_image_data(hash: String, state: State<'_, LibraryAppState>) -> Result<S
 }
 
 #[tauri::command]
+fn community_api_url(state: State<'_, CommunityAppState>) -> String {
+    state.client.base_url()
+}
+
+#[tauri::command]
+async fn community_login(
+    app: tauri::AppHandle,
+    state: State<'_, CommunityAppState>,
+) -> Result<community::SessionView, String> {
+    state.client.login(&app).await
+}
+
+#[tauri::command]
+async fn community_session(
+    state: State<'_, CommunityAppState>,
+) -> Result<Option<community::SessionView>, String> {
+    state.client.session().await
+}
+
+#[tauri::command]
+async fn community_update_username(
+    username: String,
+    state: State<'_, CommunityAppState>,
+) -> Result<community::PublicUser, String> {
+    state.client.update_username(&username).await
+}
+
+#[tauri::command]
+async fn community_logout(state: State<'_, CommunityAppState>) -> Result<(), String> {
+    state.client.logout().await
+}
+
+#[tauri::command]
+async fn community_browse(
+    query: Option<String>,
+    cursor: Option<String>,
+    state: State<'_, CommunityAppState>,
+) -> Result<community::PublicationList, String> {
+    state.client.browse(query, cursor).await
+}
+
+#[tauri::command]
+async fn community_owned_publications(
+    state: State<'_, CommunityAppState>,
+    library_state: State<'_, LibraryAppState>,
+) -> Result<Vec<community::CommunitySound>, String> {
+    let publications = state.client.owned_publications().await?;
+    let identities = publications
+        .iter()
+        .map(|publication| (publication.id.clone(), publication.audio.hash.clone()))
+        .collect::<Vec<_>>();
+    with_library(library_state, |service| {
+        service.reconcile_publications(&identities)
+    })?;
+    Ok(publications)
+}
+
+#[tauri::command]
+async fn community_publish_sound(
+    sound_id: String,
+    description: String,
+    progress: tauri::ipc::Channel<community::TransferProgress>,
+    library_state: State<'_, LibraryAppState>,
+    community_state: State<'_, CommunityAppState>,
+) -> Result<community::CommunitySound, String> {
+    let (sound, audio, image) = with_library(library_state.clone(), |service| {
+        service.sound_assets(&sound_id)
+    })?;
+    if sound.publication_id.is_some() {
+        return Err("Ce son est déjà publié.".to_owned());
+    }
+    let publication = community_state
+        .client
+        .publish(
+            &audio,
+            image.as_deref(),
+            &sound.title,
+            &description,
+            progress,
+        )
+        .await?;
+    let hash = sound.audio_hash.clone();
+    let publication_id = publication.id.clone();
+    with_library(library_state, |service| {
+        service.set_publication(&sound_id, &publication_id, &hash)
+    })?;
+    Ok(publication)
+}
+
+#[tauri::command]
+async fn community_delete_publication(
+    publication_id: String,
+    library_state: State<'_, LibraryAppState>,
+    community_state: State<'_, CommunityAppState>,
+) -> Result<(), String> {
+    community_state
+        .client
+        .delete_publication(&publication_id)
+        .await?;
+    with_library(library_state, |service| {
+        service.clear_publication(&publication_id)
+    })
+}
+
+#[tauri::command]
+async fn community_import_sound(
+    publication_id: String,
+    soundboard_id: String,
+    progress: tauri::ipc::Channel<community::TransferProgress>,
+    app: tauri::AppHandle,
+    library_state: State<'_, LibraryAppState>,
+    community_state: State<'_, CommunityAppState>,
+) -> Result<Sound, String> {
+    let staging = app
+        .path()
+        .app_cache_dir()
+        .map_err(|_| "Le dossier temporaire est indisponible.".to_owned())?
+        .join("community-staging")
+        .join(uuid::Uuid::new_v4().to_string());
+    let downloaded = community_state
+        .client
+        .download_import(&publication_id, &staging, progress)
+        .await;
+    let result = match downloaded {
+        Ok((publication, audio, image)) => with_library(library_state, |service| {
+            service.import_community_sound(
+                &soundboard_id,
+                &audio,
+                image.as_deref(),
+                &publication.title,
+            )
+        }),
+        Err(error) => Err(error),
+    };
+    let _ = std::fs::remove_dir_all(&staging);
+    if result.is_ok() {
+        community_state.client.log(
+            "info",
+            "community.import",
+            "Son importé dans la bibliothèque locale",
+        );
+    }
+    result
+}
+
+#[tauri::command]
+fn diagnostics_settings(library_state: State<'_, LibraryAppState>) -> Result<bool, String> {
+    with_library(library_state, |service| service.diagnostics_enabled())
+}
+
+#[tauri::command]
+fn set_diagnostics_settings(
+    enabled: bool,
+    library_state: State<'_, LibraryAppState>,
+    community_state: State<'_, CommunityAppState>,
+) -> Result<(), String> {
+    with_library(library_state, |service| {
+        service.set_diagnostics_enabled(enabled)
+    })?;
+    community_state.client.set_diagnostics(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+fn read_diagnostics(state: State<'_, CommunityAppState>) -> Result<String, String> {
+    state.client.read_logs()
+}
+
+#[tauri::command]
+fn clear_diagnostics(state: State<'_, CommunityAppState>) -> Result<(), String> {
+    state.client.clear_logs()
+}
+
+#[tauri::command]
+fn driver_status(app: tauri::AppHandle) -> driver::DriverStatus {
+    driver::status(&app)
+}
+
+#[tauri::command]
+fn install_driver(app: tauri::AppHandle) -> Result<(), String> {
+    driver::request_install(&app)
+}
+
+#[tauri::command]
+fn remove_driver() -> Result<(), String> {
+    driver::request_remove()
+}
+
+#[tauri::command]
 fn play_sound(
     sound_id: String,
     library_state: State<'_, LibraryAppState>,
@@ -506,10 +803,18 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let root = app.path().app_data_dir()?;
+            let library = LibraryService::open(&root)?;
+            let diagnostics_enabled = library.diagnostics_enabled()?;
             app.manage(LibraryAppState {
-                service: Mutex::new(LibraryService::open(&root)?),
+                service: Mutex::new(library),
+            });
+            app.manage(CommunityAppState {
+                client: community::CommunityClient::new(&root, diagnostics_enabled)
+                    .map_err(std::io::Error::other)?,
             });
             Ok(())
         })
@@ -523,6 +828,10 @@ pub fn run() {
             set_master_gain,
             set_master_muted,
             set_monitoring,
+            list_output_devices,
+            virtual_output_device,
+            set_virtual_output_device,
+            open_virtual_cable_download,
             set_monitor_gain,
             set_monitor_muted,
             library_snapshot,
@@ -538,6 +847,23 @@ pub fn run() {
             delete_sound,
             reorder_sounds,
             sound_image_data,
+            community_api_url,
+            community_login,
+            community_session,
+            community_update_username,
+            community_logout,
+            community_browse,
+            community_owned_publications,
+            community_publish_sound,
+            community_delete_publication,
+            community_import_sound,
+            diagnostics_settings,
+            set_diagnostics_settings,
+            read_diagnostics,
+            clear_diagnostics,
+            driver_status,
+            install_driver,
+            remove_driver,
             play_sound,
             stop_all_sounds,
         ])

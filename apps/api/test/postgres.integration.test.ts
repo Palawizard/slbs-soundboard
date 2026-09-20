@@ -33,7 +33,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL community repository", () => {
   it("applies migrations idempotently and rolls a failed migration back", async () => {
     await migrateDatabase(repository.pool);
     const applied = await repository.pool.query<{ version: string }>("SELECT version FROM schema_migrations ORDER BY version");
-    expect(applied.rows.map((row) => row.version)).toEqual(["001_community.sql", "002_integrity.sql"]);
+    expect(applied.rows.map((row) => row.version)).toEqual(["001_community.sql", "002_integrity.sql", "003_publication_identity.sql"]);
 
     const root = await mkdtemp(join(tmpdir(), "slb-migration-"));
     try {
@@ -66,6 +66,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL community repository", () => {
 
     const publication = await repository.createPublication(first.id, { title: "Cloche bleue", description: "Un son communautaire", audioMediaId: audio.id, imageMediaId: null });
     expect((await repository.listPublications({ query: "cloche", limit: 10 })).map((row) => row.id)).toContain(publication.id);
+    expect((await repository.listOwnedPublications(first.id)).map((row) => row.id)).toEqual([publication.id]);
+    await expect(repository.createPublication(first.id, { title: "Doublon", description: "", audioMediaId: audio.id, imageMediaId: null })).rejects.toMatchObject({ code: "conflict" });
     await expect(repository.createPublication(second.id, { title: "Copie", description: "", audioMediaId: audio.id, imageMediaId: null })).rejects.toMatchObject({ code: "forbidden" });
 
     await expect(repository.pool.query(

@@ -20,6 +20,14 @@ describe("publication pagination", () => {
     expect(repository.listPublications).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: { createdAt: new Date("2026-01-02T00:00:00Z"), id: rows[1]!.id } }));
     await expect(service.list({ limit: 2, cursor: `${first.nextCursor}x` })).rejects.toThrow("curseur");
   });
+
+  it("returns only the current account publications", async () => {
+    const rows = [publication("423e4567-e89b-12d3-a456-426614174001", "2026-01-03T00:00:00Z")];
+    const repository = { listOwnedPublications: vi.fn(async () => rows) } as unknown as CommunityRepository;
+    const service = new PublicationService(repository, "https://community.example.test", "s".repeat(32));
+    expect(await service.listOwned(owner.id)).toEqual([expect.objectContaining({ id: rows[0]!.id })]);
+    expect(repository.listOwnedPublications).toHaveBeenCalledWith(owner.id);
+  });
 });
 
 describe("HTTP byte ranges", () => {

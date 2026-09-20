@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <CustomAction Id="InstallSlbVirtualMicrophone"
+                  Directory="INSTALLDIR"
+                  ExeCommand="&quot;[INSTALLDIR]SLB's Soundboard.exe&quot; --driver-install &quot;[INSTALLDIR]driver&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+    <CustomAction Id="RemoveSlbVirtualMicrophone"
+                  Directory="INSTALLDIR"
+                  ExeCommand="&quot;[INSTALLDIR]SLB's Soundboard.exe&quot; --driver-remove"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="InstallSlbVirtualMicrophone" After="InstallFiles">NOT Installed</Custom>
+      <Custom Action="RemoveSlbVirtualMicrophone" Before="RemoveFiles">REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE</Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

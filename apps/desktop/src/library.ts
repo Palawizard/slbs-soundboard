@@ -13,6 +13,7 @@ export type Sound = {
   waveform: number[];
   playback: PlaybackProfile;
   createdAtMs: number;
+  publicationId: string | null;
 };
 
 export type ReplayPolicy = "overlap" | "toggle" | "stop" | "restart";

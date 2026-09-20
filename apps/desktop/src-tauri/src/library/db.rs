@@ -62,6 +62,15 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE sounds ADD COLUMN keybind TEXT;
     CREATE UNIQUE INDEX sounds_keybind_idx ON sounds(keybind) WHERE keybind IS NOT NULL;
     "#,
+    r#"
+    CREATE TABLE community_publications (
+        sound_id TEXT PRIMARY KEY REFERENCES sounds(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL,
+        audio_hash TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
+    );
+    CREATE INDEX community_publications_id_idx ON community_publications(publication_id);
+    "#,
 ];
 
 pub struct LibraryRepository {
@@ -245,6 +254,75 @@ impl LibraryRepository {
         self.sound_by_id(&id)?.ok_or(LibraryError::NotFound)
     }
 
+    pub fn create_community_sound(
+        &mut self,
+        soundboard_id: &str,
+        sound: NewSound<'_>,
+        audio: &MediaAsset,
+        image: Option<&MediaAsset>,
+    ) -> Result<Sound, LibraryError> {
+        let title = validate_title(sound.title, 120)?;
+        let transaction = self.connection.transaction()?;
+        insert_asset(&transaction, audio)?;
+        if let Some(image) = image {
+            insert_asset(&transaction, image)?;
+        }
+        let position: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM soundboard_sounds WHERE soundboard_id = ?1",
+            [soundboard_id],
+            |row| row.get(0),
+        )?;
+        let id = Uuid::new_v4().to_string();
+        transaction.execute(
+            "INSERT INTO sounds(id, title, audio_hash, duration_ms, sample_rate, channels, image_hash, waveform_json, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![id, title, sound.audio_hash, sound.duration_ms, sound.sample_rate, sound.channels, image.map(|asset| asset.hash.as_str()), serde_json::to_string(sound.waveform).map_err(|_| LibraryError::AudioDecode)?, now_ms()],
+        )?;
+        transaction.execute(
+            "INSERT INTO soundboard_sounds(soundboard_id, sound_id, position) VALUES (?1, ?2, ?3)",
+            params![soundboard_id, id, position],
+        )?;
+        transaction.commit()?;
+        self.sound_by_id(&id)?.ok_or(LibraryError::NotFound)
+    }
+
+    pub fn set_publication(
+        &self,
+        sound_id: &str,
+        publication_id: &str,
+        audio_hash: &str,
+    ) -> Result<(), LibraryError> {
+        self.connection.execute(
+            "INSERT INTO community_publications(sound_id, publication_id, audio_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(sound_id) DO UPDATE SET publication_id = excluded.publication_id, audio_hash = excluded.audio_hash",
+            params![sound_id, publication_id, audio_hash, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_publication(&self, publication_id: &str) -> Result<(), LibraryError> {
+        self.connection.execute(
+            "DELETE FROM community_publications WHERE publication_id = ?1",
+            [publication_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn replace_publications(
+        &mut self,
+        values: &[(String, String, String)],
+    ) -> Result<(), LibraryError> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM community_publications", [])?;
+        for (sound_id, publication_id, audio_hash) in values {
+            transaction.execute(
+                "INSERT INTO community_publications(sound_id, publication_id, audio_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
+                params![sound_id, publication_id, audio_hash, now_ms()],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn rename_sound(&self, id: &str, title: &str) -> Result<(), LibraryError> {
         let title = validate_title(title, 120)?;
         require_changed(self.connection.execute(
@@ -393,11 +471,12 @@ impl LibraryRepository {
 
     fn list_sounds(&self, soundboard_id: &str) -> Result<Vec<Sound>, LibraryError> {
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.volume, s.pitch_semitones, s.speed, s.replay_policy, s.keybind, s.created_at_ms
+            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.volume, s.pitch_semitones, s.speed, s.replay_policy, s.keybind, s.created_at_ms, cp.publication_id
              FROM soundboard_sounds ss
              JOIN sounds s ON s.id = ss.sound_id
              JOIN media_assets audio ON audio.hash = s.audio_hash
              LEFT JOIN media_assets image ON image.hash = s.image_hash
+             LEFT JOIN community_publications cp ON cp.sound_id = s.id
              WHERE ss.soundboard_id = ?1 ORDER BY ss.position",
         )?;
         let sounds = statement
@@ -408,9 +487,10 @@ impl LibraryRepository {
 
     fn sound_by_id(&self, sound_id: &str) -> Result<Option<Sound>, LibraryError> {
         Ok(self.connection.query_row(
-            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.volume, s.pitch_semitones, s.speed, s.replay_policy, s.keybind, s.created_at_ms
+            "SELECT s.id, s.title, s.audio_hash, audio.extension, s.duration_ms, s.sample_rate, s.channels, s.image_hash, image.extension, s.waveform_json, s.volume, s.pitch_semitones, s.speed, s.replay_policy, s.keybind, s.created_at_ms, cp.publication_id
              FROM sounds s JOIN media_assets audio ON audio.hash = s.audio_hash
-             LEFT JOIN media_assets image ON image.hash = s.image_hash WHERE s.id = ?1",
+             LEFT JOIN media_assets image ON image.hash = s.image_hash
+             LEFT JOIN community_publications cp ON cp.sound_id = s.id WHERE s.id = ?1",
             [sound_id], map_sound,
         ).optional()?)
     }
@@ -437,7 +517,16 @@ fn map_sound(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sound> {
             keybind: row.get(14)?,
         },
         created_at_ms: row.get(15)?,
+        publication_id: row.get(16)?,
     })
+}
+
+fn insert_asset(transaction: &Transaction<'_>, asset: &MediaAsset) -> Result<(), LibraryError> {
+    transaction.execute(
+        "INSERT OR IGNORE INTO media_assets(hash, kind, extension, byte_size, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![asset.hash, asset.kind, asset.extension, asset.byte_size, now_ms()],
+    )?;
+    Ok(())
 }
 
 fn validate_title(title: &str, maximum: usize) -> Result<&str, LibraryError> {
@@ -610,6 +699,19 @@ mod tests {
         assert_eq!(stored_sound.id, sound.id);
         assert_eq!(stored_sound.playback.volume, 1.4);
         assert_eq!(stored_sound.playback.replay_policy, ReplayPolicy::Overlap);
+        repository
+            .set_publication(&sound.id, "423e4567-e89b-12d3-a456-426614174001", "abc")
+            .unwrap();
+        assert_eq!(
+            repository.list_soundboards().unwrap()[0].sounds[0]
+                .publication_id
+                .as_deref(),
+            Some("423e4567-e89b-12d3-a456-426614174001")
+        );
+        repository.replace_publications(&[]).unwrap();
+        assert!(repository.list_soundboards().unwrap()[0].sounds[0]
+            .publication_id
+            .is_none());
         let orphaned = repository.delete_sound(&board.id, &sound.id).unwrap();
         assert_eq!(orphaned, ["abc"]);
         assert!(repository.media_asset("abc").unwrap().is_none());
