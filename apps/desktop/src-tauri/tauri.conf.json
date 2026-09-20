@@ -20,18 +20,32 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' customprotocol: asset:; connect-src ipc: http://ipc.localhost http://127.0.0.1:* https:; img-src 'self' asset: http://asset.localhost data: https:; media-src 'self' asset: http://asset.localhost http://127.0.0.1:* https: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["msi"],
+    "targets": [
+      "msi"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY0REJFRDkyNDRDOTBBNTgKUldSWUNzbEVrdTNiOU9pUTlEcVAyRk80NDI0ZHZuNzVYajZGSHhqL09UY01ibjcwdit0YkdKZGwK",
+      "endpoints": [
+        "https://github.com/Palawizard/slbs-soundboard/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
