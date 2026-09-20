@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use crate::monitor::{MonitorOutput, MonitorProducer};
-use crate::virtual_sink::{VirtualSink, VirtualSinkProducer};
 use crate::playback::PolyphonicPlayer;
+use crate::virtual_sink::{VirtualSink, VirtualSinkProducer};
 use crate::{
     CHANNELS, CaptureError, CaptureSource, DEFAULT_CAPACITY_FRAMES, IpcError, IpcHealth, MixBus,
     MixStats, RealtimeMixer, SAMPLE_RATE, SharedRingWriter, WasapiCaptureSource,

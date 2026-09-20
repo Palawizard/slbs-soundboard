@@ -8,7 +8,6 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_queue::ArrayQueue;
 
 use crate::output::{FrameSource, build_output_stream};
-
 use crate::{CHANNELS, SAMPLE_RATE};
 
 const MONITOR_CAPACITY_SAMPLES: usize = SAMPLE_RATE as usize * CHANNELS as usize * 2;
