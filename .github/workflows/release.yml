@@ -1,0 +1,68 @@
+name: Release
+
+# Publishes a Windows build and the updater manifest. Installed copies poll
+# `releases/latest/download/latest.json`, so a run of this workflow is all that
+# is needed for existing users to be offered the new version.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      # Only the desktop workspace: the community API needs PostgreSQL and FFmpeg,
+      # and it is not part of this build.
+      - name: Check the desktop workspace
+        run: |
+          npm run typecheck --workspace @slb/desktop
+          npm test --workspace @slb/desktop
+
+      - name: Build, sign and publish the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          # GitHub rewrites the apostrophe of "SLB's Soundboard" when it stores an
+          # asset, and tauri-action then fails to match the signature with its
+          # installer, so it skips latest.json. Plain ASCII names keep them paired.
+          assetNamePattern: "slbs-soundboard_[version]_[arch][ext]"
+          tagName: v__VERSION__
+          releaseName: "SLB's Soundboard v__VERSION__"
+          releaseBody: |
+            Installez le MSI pour une première installation. Les versions déjà
+            installées proposent la mise à jour automatiquement au démarrage.
+
+            Le microphone virtuel passe par un câble audio virtuel : installez
+            VB-CABLE (https://vb-audio.com/Cable/), choisissez-le dans l'onglet
+            Audio, puis sélectionnez « CABLE Output » comme micro dans Discord.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

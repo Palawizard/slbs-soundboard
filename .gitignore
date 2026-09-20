@@ -29,3 +29,7 @@ native/driver/**/ARM64/
 native/driver/package/
 native/driver/**/*.inf
 !native/driver/**/*.inx
+apps/desktop/src-tauri/release-resources/
+
+# Updater signing key, never committed
+updater-private-key.txt

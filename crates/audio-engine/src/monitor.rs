@@ -3,10 +3,11 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use cpal::Stream;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use crossbeam_queue::ArrayQueue;
 
+use crate::output::{FrameSource, build_output_stream};
 use crate::{CHANNELS, SAMPLE_RATE};
 
 const MONITOR_CAPACITY_SAMPLES: usize = SAMPLE_RATE as usize * CHANNELS as usize * 2;
@@ -235,60 +236,9 @@ fn open_default_stream(
     let sample_format = supported.sample_format();
     let config = supported.config();
     let (error_sender, error_receiver) = std::sync::mpsc::channel();
-    let stream = build_stream(&device, &config, sample_format, shared, error_sender)?;
+    let reader = MonitorReader::new(shared, config.sample_rate.0);
+    let stream = build_output_stream(&device, &config, sample_format, reader, error_sender)?;
     Ok((stream, device_name, error_receiver))
-}
-
-fn build_stream(
-    device: &Device,
-    config: &StreamConfig,
-    sample_format: SampleFormat,
-    shared: Arc<MonitorShared>,
-    error_sender: std::sync::mpsc::Sender<String>,
-) -> Result<Stream, String> {
-    let channels = config.channels as usize;
-    let output_rate = config.sample_rate.0;
-    let error_callback = move |error: cpal::StreamError| {
-        let _ = error_sender.send(error.to_string());
-    };
-    match sample_format {
-        SampleFormat::F32 => {
-            let mut reader = MonitorReader::new(shared, output_rate);
-            device
-                .build_output_stream(
-                    config,
-                    move |output: &mut [f32], _| reader.write_f32(output, channels),
-                    error_callback,
-                    None,
-                )
-                .map_err(|error| error.to_string())
-        }
-        SampleFormat::I16 => {
-            let mut reader = MonitorReader::new(shared, output_rate);
-            device
-                .build_output_stream(
-                    config,
-                    move |output: &mut [i16], _| reader.write_i16(output, channels),
-                    error_callback,
-                    None,
-                )
-                .map_err(|error| error.to_string())
-        }
-        SampleFormat::U16 => {
-            let mut reader = MonitorReader::new(shared, output_rate);
-            device
-                .build_output_stream(
-                    config,
-                    move |output: &mut [u16], _| reader.write_u16(output, channels),
-                    error_callback,
-                    None,
-                )
-                .map_err(|error| error.to_string())
-        }
-        _ => Err(format!(
-            "Le format de sortie {sample_format:?} n’est pas pris en charge."
-        )),
-    }
 }
 
 struct MonitorReader {
@@ -312,6 +262,19 @@ impl MonitorReader {
         }
     }
 
+    fn pop_frame(&self) -> [f32; 2] {
+        match (self.shared.samples.pop(), self.shared.samples.pop()) {
+            (Some(left), Some(right)) => [left, right],
+            _ => {
+                self.shared.underrun_frames.fetch_add(1, Ordering::Relaxed);
+                [0.0; 2]
+            }
+        }
+    }
+
+}
+
+impl FrameSource for MonitorReader {
     fn next_frame(&mut self) -> [f32; 2] {
         if !self.shared.enabled.load(Ordering::Relaxed)
             || self.shared.muted.load(Ordering::Relaxed)
@@ -339,57 +302,6 @@ impl MonitorReader {
         [result[0].clamp(-1.0, 1.0), result[1].clamp(-1.0, 1.0)]
     }
 
-    fn pop_frame(&self) -> [f32; 2] {
-        match (self.shared.samples.pop(), self.shared.samples.pop()) {
-            (Some(left), Some(right)) => [left, right],
-            _ => {
-                self.shared.underrun_frames.fetch_add(1, Ordering::Relaxed);
-                [0.0; 2]
-            }
-        }
-    }
-
-    fn write_f32(&mut self, output: &mut [f32], channels: usize) {
-        write_frames(output, channels, || self.next_frame(), |sample| sample);
-    }
-
-    fn write_i16(&mut self, output: &mut [i16], channels: usize) {
-        write_frames(
-            output,
-            channels,
-            || self.next_frame(),
-            |sample| (sample * i16::MAX as f32).round() as i16,
-        );
-    }
-
-    fn write_u16(&mut self, output: &mut [u16], channels: usize) {
-        write_frames(
-            output,
-            channels,
-            || self.next_frame(),
-            |sample| (((sample + 1.0) * 0.5) * u16::MAX as f32).round() as u16,
-        );
-    }
-}
-
-fn write_frames<T: Copy>(
-    output: &mut [T],
-    channels: usize,
-    mut next_frame: impl FnMut() -> [f32; 2],
-    convert: impl Fn(f32) -> T,
-) {
-    for output_frame in output.chunks_exact_mut(channels.max(1)) {
-        let frame = next_frame();
-        for (channel, sample) in output_frame.iter_mut().enumerate() {
-            *sample = convert(if channel == 0 {
-                frame[0]
-            } else if channel == 1 {
-                frame[1]
-            } else {
-                (frame[0] + frame[1]) * 0.5
-            });
-        }
-    }
 }
 
 fn update_status(shared: &MonitorShared, update: impl FnOnce(&mut MonitorStatus)) {

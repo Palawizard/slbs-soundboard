@@ -32,6 +32,18 @@ symphonia = { version = "0.5", features = ["all"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 base64 = "0.22"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "stream", "rustls-tls"] }
+tokio = { version = "1", features = ["net", "io-util", "fs", "time", "rt-multi-thread", "macros"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
+keyring = { version = "4.1.5", features = ["v1"] }
+rand = "0.9"
+url = "2"
 
 [dev-dependencies]
 tempfile = "3"
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.61", features = ["Win32_Devices_DeviceAndDriverInstallation", "Win32_Foundation"] }

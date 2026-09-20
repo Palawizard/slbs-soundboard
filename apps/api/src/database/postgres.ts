@@ -181,7 +181,11 @@ export class PostgresCommunityRepository implements CommunityRepository {
       }
       await client.query(`INSERT INTO publications(id, owner_id, audio_media_id, image_media_id, title, description) VALUES ($1,$2,$3,$4,$5,$6)`, [id, userId, input.audioMediaId, input.imageMediaId, input.title, input.description]);
       await client.query("COMMIT");
-    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if (isPgCode(error, "23505")) throw new DomainError("conflict", "Ce son est déjà publié.");
+      throw error;
+    } finally { client.release(); }
     return required(await this.findPublication(id, true));
   }
 
@@ -197,6 +201,14 @@ export class PostgresCommunityRepository implements CommunityRepository {
     const result = await this.pool.query<DatabaseRow>(
       `${publicationSelect} WHERE ${conditions.join(" AND ")} ORDER BY p.created_at DESC, p.id DESC LIMIT $${values.length}`,
       values,
+    );
+    return result.rows.map(mapPublication);
+  }
+
+  async listOwnedPublications(userId: string): Promise<PublicationRecord[]> {
+    const result = await this.pool.query<DatabaseRow>(
+      `${publicationSelect} WHERE p.owner_id = $1 AND p.status = 'active' ORDER BY p.created_at DESC, p.id DESC`,
+      [userId],
     );
     return result.rows.map(mapPublication);
   }
