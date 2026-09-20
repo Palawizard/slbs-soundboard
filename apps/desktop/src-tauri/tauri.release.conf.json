@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "release-resources/driver/": "driver/"
+    },
+    "windows": {
+      "signCommand": {
+        "cmd": "powershell.exe",
+        "args": ["-NoProfile", "-NonInteractive", "-File", "../../../scripts/sign-windows.ps1", "%1"]
+      },
+      "wix": {
+        "upgradeCode": "b452399f-4c79-5a35-8252-e9f1da2ec8bd",
+        "fragmentPaths": ["./windows/driver-lifecycle.wxs"]
+      }
+    }
+  }
+}
