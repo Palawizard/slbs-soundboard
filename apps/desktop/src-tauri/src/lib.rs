@@ -198,7 +198,12 @@ fn launch_engine(
             engine.set_virtual_output_device(device);
         }
     }
-    engine.set_monitor_enabled(true);
+    let enabled = library
+        .lock()
+        .ok()
+        .and_then(|service| service.monitor_enabled().ok())
+        .unwrap_or(true);
+    engine.set_monitor_enabled(enabled);
     Ok(engine)
 }
 
@@ -413,16 +418,26 @@ fn set_master_muted(
         .map_err(|error| error.to_string())
 }
 
+/// Persists the monitoring choice so the next launch honours it.
 #[tauri::command]
-fn set_monitoring(enabled: bool, state: State<'_, AudioAppState>) -> Result<(), String> {
+fn set_monitoring(
+    enabled: bool,
+    state: State<'_, AudioAppState>,
+    library: State<'_, LibraryAppState>,
+) -> Result<(), String> {
+    library
+        .service
+        .lock()
+        .map_err(|_| "La bibliotheque est indisponible.".to_owned())?
+        .set_monitor_enabled(enabled)
+        .map_err(|error| error.to_string())?;
     let slot = state
         .engine
         .lock()
         .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
-    let engine = slot
-        .as_ref()
-        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?;
-    engine.set_monitor_enabled(enabled);
+    if let Some(engine) = slot.as_ref() {
+        engine.set_monitor_enabled(enabled);
+    }
     Ok(())
 }
 
@@ -808,6 +823,20 @@ fn play_sound(
 }
 
 #[tauri::command]
+fn stop_sound(sound_id: String, audio_state: State<'_, AudioAppState>) -> Result<(), String> {
+    let slot = audio_state
+        .engine
+        .lock()
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
+    if let Some(engine) = slot.as_ref() {
+        engine
+            .stop_sound(playback_id(&sound_id))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn stop_all_sounds(audio_state: State<'_, AudioAppState>) -> Result<(), String> {
     let slot = audio_state
         .engine
@@ -827,6 +856,68 @@ fn playback_id(sound_id: &str) -> PlaybackId {
     PlaybackId(hasher.finish())
 }
 
+/// Windows launch-at-login state, owned by the autostart plugin registry entry.
+#[tauri::command]
+fn autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    }
+    .map_err(|error| error.to_string())
+}
+
+/// Tray icon with the window toggle and a real quit, plus closing the window
+/// hiding the application instead of shutting the soundboard down.
+fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::TrayIconBuilder;
+
+    let show = MenuItem::with_id(app, "show", "Ouvrir", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut builder = TrayIconBuilder::with_id("main")
+        .tooltip("SLB's Soundboard")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let tauri::tray::TrayIconEvent::Click {
+                button: tauri::tray::MouseButton::Left,
+                button_state: tauri::tray::MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -838,6 +929,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
+        .on_window_event(|window, event| {
+            // Closing the window keeps the sounds and the keybinds alive in the tray.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             let root = app.path().app_data_dir()?;
             let library = LibraryService::open(&root)?;
@@ -849,6 +951,13 @@ pub fn run() {
                 client: community::CommunityClient::new(&root, diagnostics_enabled)
                     .map_err(std::io::Error::other)?,
             });
+            setup_tray(app.handle())?;
+            // A launch at login starts in the tray, without stealing the desktop.
+            if std::env::args().any(|argument| argument == "--minimized") {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
             // The microphone is always live: opening a capture device can block,
             // so it happens off the setup thread and never delays the window.
             let handle = app.handle().clone();
@@ -910,7 +1019,10 @@ pub fn run() {
             install_driver,
             remove_driver,
             play_sound,
+            stop_sound,
             stop_all_sounds,
+            autostart_enabled,
+            set_autostart,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
