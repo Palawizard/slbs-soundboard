@@ -18,7 +18,7 @@ use windows::{
             Threading::{CreateEventW, WaitForSingleObject},
         },
     },
-    core::{GUID, PCWSTR, PWSTR},
+    core::{GUID, HRESULT, PCWSTR, PWSTR},
 };
 
 use crate::{AudioDevice, AudioFormat, CaptureError, CaptureSource, DeviceCatalog, SampleEncoding};
@@ -28,20 +28,38 @@ const WAVE_FORMAT_EXTENSIBLE: u16 = 0xfffe;
 const PCM_SUBFORMAT: GUID = GUID::from_u128(0x00000001_0000_0010_8000_00aa00389b71);
 const FLOAT_SUBFORMAT: GUID = GUID::from_u128(0x00000003_0000_0010_8000_00aa00389b71);
 
-struct ComApartment;
+/// Returned by `CoInitializeEx` when the thread already belongs to an apartment
+/// of a different model.
+const RPC_E_CHANGED_MODE: HRESULT = HRESULT(0x8001_0106_u32 as i32);
+
+struct ComApartment {
+    owned: bool,
+}
 
 impl ComApartment {
+    /// Joins the thread's COM apartment, asking for the multi-threaded model.
+    ///
+    /// Another component may already have placed this thread in a
+    /// single-threaded apartment: the Windows file dialog requires one, and
+    /// `cpal` creates one on whatever thread enumerates devices. Windows reports
+    /// that as `RPC_E_CHANGED_MODE`, which is not a failure — COM remains usable
+    /// for device enumeration and activation. The apartment then belongs to its
+    /// creator, so it must not be uninitialized here.
     fn initialize() -> Result<Self, CaptureError> {
-        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
-            .ok()
-            .map_err(platform_error)?;
-        Ok(Self)
+        let result = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        if result == RPC_E_CHANGED_MODE {
+            return Ok(Self { owned: false });
+        }
+        result.ok().map_err(platform_error)?;
+        Ok(Self { owned: true })
     }
 }
 
 impl Drop for ComApartment {
     fn drop(&mut self) {
-        unsafe { CoUninitialize() };
+        if self.owned {
+            unsafe { CoUninitialize() };
+        }
     }
 }
 
@@ -418,6 +436,32 @@ mod tests {
     use super::{decode_interleaved, parse_wave_format};
     use crate::{AudioFormat, SampleEncoding};
     use windows::Win32::Media::Audio::{WAVE_FORMAT_PCM, WAVEFORMATEX};
+    use super::{ComApartment, RPC_E_CHANGED_MODE};
+    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
+
+    #[test]
+    fn changed_mode_matches_the_documented_hresult() {
+        assert_eq!(RPC_E_CHANGED_MODE.0, -2_147_417_850);
+    }
+
+    #[test]
+    fn joins_a_foreign_single_threaded_apartment_without_owning_it() {
+        // Reproduces the conflict seen in the application: the file dialog and
+        // cpal both leave the calling thread in a single-threaded apartment,
+        // after which asking for the multi-threaded model returns
+        // RPC_E_CHANGED_MODE. Device enumeration must keep working.
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+            .ok()
+            .expect("the test thread should enter a single-threaded apartment");
+        let apartment =
+            ComApartment::initialize().expect("a foreign apartment is not a failure");
+        assert!(
+            !apartment.owned,
+            "an apartment created elsewhere must not be uninitialized here"
+        );
+        drop(apartment);
+        unsafe { CoUninitialize() };
+    }
 
     #[test]
     fn parses_pcm_wave_format() {
