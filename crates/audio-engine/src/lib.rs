@@ -32,7 +32,7 @@ pub use mixer::{MixBus, MixStats, MixerCommand, RealtimeMixer};
 pub use monitor::MonitorStatus;
 #[cfg(windows)]
 pub use output::output_device_names;
-pub use playback::{PlaybackId, ReplayPolicy};
+pub use playback::{MAX_ACTIVE_VOICES, PlaybackId, ReplayPolicy};
 pub use quality::{AudioQualityReport, run_reference_quality_probe};
 pub use resampler::{ResampleError, ResampleResult, WindowedSincResampler};
 #[cfg(windows)]

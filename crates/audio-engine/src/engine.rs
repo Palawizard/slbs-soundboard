@@ -43,6 +43,7 @@ pub struct EngineStatus {
     pub playback_total_frames: u64,
     pub playback_paused: bool,
     pub active_voices: usize,
+    pub active_sounds: [Option<PlaybackId>; crate::MAX_ACTIVE_VOICES],
     pub monitor: crate::MonitorStatus,
     pub virtual_sink: crate::VirtualSinkStatus,
 }
@@ -62,6 +63,7 @@ impl EngineStatus {
             playback_total_frames: 0,
             playback_paused: false,
             active_voices: 0,
+            active_sounds: [None; crate::MAX_ACTIVE_VOICES],
             monitor: crate::MonitorStatus::default(),
             virtual_sink: crate::VirtualSinkStatus::default(),
         }
@@ -556,6 +558,7 @@ impl EngineRuntime {
             status.playback_total_frames = self.player.total_frames();
             status.playback_paused = self.player.paused();
             status.active_voices = self.player.active_voice_count();
+            status.active_sounds = self.player.active_ids();
         }
     }
 
@@ -585,6 +588,7 @@ impl EngineRuntime {
         status.playback_total_frames = self.player.total_frames();
         status.playback_paused = self.player.paused();
         status.active_voices = self.player.active_voice_count();
+        status.active_sounds = self.player.active_ids();
     }
 }
 

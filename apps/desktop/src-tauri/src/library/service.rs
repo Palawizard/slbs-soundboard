@@ -230,14 +230,16 @@ impl LibraryService {
         self.backup()
     }
 
-    /// Local monitoring of the triggered sounds, on unless the user turned it off.
-    pub fn monitor_enabled(&self) -> Result<bool, LibraryError> {
-        Ok(self.repository.setting("monitor_enabled")?.as_deref() != Some("false"))
+    /// Serialized mixing levels, absent until the user changes one of them.
+    pub fn mix_settings(&self) -> Result<Option<String>, LibraryError> {
+        Ok(self
+            .repository
+            .setting("mix_settings")?
+            .filter(|value| !value.is_empty()))
     }
 
-    pub fn set_monitor_enabled(&mut self, enabled: bool) -> Result<(), LibraryError> {
-        self.repository
-            .set_setting("monitor_enabled", if enabled { "true" } else { "false" })?;
+    pub fn set_mix_settings(&mut self, value: &str) -> Result<(), LibraryError> {
+        self.repository.set_setting("mix_settings", value)?;
         self.backup()
     }
 
