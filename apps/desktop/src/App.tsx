@@ -7,6 +7,8 @@ import { shortcutFromKeyboardEvent, shortcutLabel, useGlobalShortcuts } from "./
 import { CommunityPage } from "./CommunityPage";
 import { SettingsPage } from "./SettingsPage";
 import { communityApi, useCommunityStore } from "./community";
+import { communityEnabled } from "./features";
+import { UpdateBanner } from "./updates";
 
 type Page = "library" | "audio" | "community" | "settings";
 type Microphone = { id: string; name: string; isDefault: boolean };
@@ -35,7 +37,13 @@ type AudioStatus = {
   monitorQueuedFrames: number;
   monitorDroppedFrames: number;
   monitorUnderrunFrames: number;
+  virtualOutputDevice: string | null;
+  virtualOutputActiveDevice: string | null;
+  virtualOutputConnected: boolean;
+  virtualOutputLastError: string | null;
+  virtualOutputDroppedFrames: number;
 };
+type OutputDevice = { name: string; isVirtualCable: boolean };
 
 const stoppedStatus: AudioStatus = {
   state: "stopped", deviceId: null, inputSampleRate: null, inputChannels: null,
@@ -46,6 +54,8 @@ const stoppedStatus: AudioStatus = {
   monitorEnabled: false, monitorMuted: false, monitorGain: 1, monitorDeviceName: null,
   monitorRestartCount: 0, monitorLastError: null, monitorQueuedFrames: 0,
   monitorDroppedFrames: 0, monitorUnderrunFrames: 0,
+  virtualOutputDevice: null, virtualOutputActiveDevice: null, virtualOutputConnected: false,
+  virtualOutputLastError: null, virtualOutputDroppedFrames: 0,
 };
 const statusLabels: Record<AudioStatus["state"], string> = {
   starting: "Démarrage", running: "Actif", recovering: "Reconnexion", stopped: "Arrêté",
@@ -357,10 +367,26 @@ function AudioPage() {
   const [levels, setLevels] = useState<Record<MixControlBus, number>>({ microphone: 1, soundboard: 1, master: 1 });
   const [mutes, setMutes] = useState<Record<MixControlBus, boolean>>({ microphone: false, soundboard: false, master: false });
   const [monitorEnabled, setMonitorEnabled] = useState(false); const [monitorMuted, setMonitorMuted] = useState(false); const [monitorGain, setMonitorGain] = useState(1);
+  const [outputs, setOutputs] = useState<OutputDevice[]>([]); const [virtualOutput, setVirtualOutput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const isRunning = status.state === "running" || status.state === "recovering";
   const selectedMicrophone = microphones.find((microphone) => microphone.id === selectedId);
+  const hasCable = outputs.some((device) => device.isVirtualCable);
   useEffect(() => { void invoke<Microphone[]>("list_microphones").then((devices) => { setMicrophones(devices); setSelectedId((devices.find((device) => device.isDefault) ?? devices[0])?.id ?? ""); }).catch((reason: unknown) => setError(String(reason))); }, []);
+  const refreshOutputs = useCallback(async () => {
+    try {
+      const devices = await invoke<OutputDevice[]>("list_output_devices");
+      setOutputs(devices);
+      const stored = await invoke<string | null>("virtual_output_device");
+      setVirtualOutput(stored && devices.some((device) => device.name === stored) ? stored : stored ?? "");
+    } catch (reason) { setError(String(reason)); }
+  }, []);
+  useEffect(() => { void refreshOutputs(); }, [refreshOutputs]);
+  async function changeVirtualOutput(name: string) {
+    setVirtualOutput(name);
+    try { await invoke("set_virtual_output_device", { device: name || null }); }
+    catch (reason) { setError(String(reason)); }
+  }
   useEffect(() => { const refresh = () => void invoke<AudioStatus>("audio_status").then(setStatus).catch((reason: unknown) => setError(String(reason))); refresh(); const timer = window.setInterval(refresh, 500); return () => window.clearInterval(timer); }, []);
   async function startAudio() {
     if (!selectedId) return; setBusy(true); setError(null);
@@ -384,16 +410,32 @@ function AudioPage() {
   async function toggleMonitorMute() { const muted = !monitorMuted; try { await invoke("set_monitor_muted", { muted }); setMonitorMuted(muted); } catch (reason) { setError(String(reason)); } }
   return (
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">Chemin audio</p><h1>Microphone virtuel</h1></div><span className={`status status-${status.state}`}><span className="status-dot" />{statusLabels[status.state]}</span></header>
-      <section className="audio-panel" aria-labelledby="audio-title"><div className="panel-copy"><p className="eyebrow">Source physique</p><h2 id="audio-title">Choisissez votre microphone</h2><p>Votre voix et les sons seront réunis dans « SLB Virtual Microphone ».</p></div>
+      <section className="audio-panel" aria-labelledby="audio-title"><div className="panel-copy"><p className="eyebrow">Source physique</p><h2 id="audio-title">Choisissez votre microphone</h2><p>Votre voix et les sons sont réunis, puis envoyés vers le câble virtuel que vous choisissez ci-dessous.</p></div>
         <label className="field-label" htmlFor="microphone-select">Microphone d’entrée</label><select id="microphone-select" value={selectedId} onChange={(event) => setSelectedId(event.target.value)} disabled={isRunning || busy}>{microphones.length === 0 && <option value="">Aucun microphone détecté</option>}{microphones.map((microphone) => <option key={microphone.id} value={microphone.id}>{microphone.name}{microphone.isDefault ? " — par défaut" : ""}</option>)}</select>
         <div className="actions">{!isRunning ? <button className="primary-button" type="button" onClick={startAudio} disabled={!selectedId || busy}>{busy ? "Démarrage…" : "Démarrer"}</button> : <button className="danger-button" type="button" onClick={stopAudio} disabled={busy}>Arrêter</button>}<button className="secondary-button" type="button" onClick={() => void invoke("play_reference_sound").catch((reason: unknown) => setError(String(reason)))} disabled={!isRunning}>Jouer le son test</button></div>
-        <div className="signal-card"><div><span className="signal-label">Entrée</span><strong>{selectedMicrophone?.name ?? "Non sélectionnée"}</strong></div><div className="route-line"><span /></div><div><span className="signal-label">Sortie</span><strong>SLB Virtual Microphone</strong></div></div>
+        <div className="signal-card"><div><span className="signal-label">Entrée</span><strong>{selectedMicrophone?.name ?? "Non sélectionnée"}</strong></div><div className="route-line"><span /></div><div><span className="signal-label">Sortie</span><strong>{virtualOutput || "Aucune sortie choisie"}</strong></div></div>
+        <section className="routing-panel" aria-labelledby="routing-title">
+          <div className="panel-copy"><p className="eyebrow">Destination</p><h2 id="routing-title">Sortie vers le micro virtuel</h2></div>
+          <label className="field-label" htmlFor="virtual-output-select">Câble virtuel</label>
+          <select id="virtual-output-select" value={virtualOutput} onChange={(event) => void changeVirtualOutput(event.target.value)} disabled={busy}>
+            <option value="">Aucune sortie</option>
+            {outputs.map((device) => <option key={device.name} value={device.name}>{device.name}{device.isVirtualCable ? " — câble virtuel" : ""}</option>)}
+          </select>
+          {!hasCable
+            ? <p className="hint">Aucun câble virtuel détecté. Installez VB-CABLE, un logiciel gratuit (donationware) publié par VB-Audio, puis actualisez la liste.
+                <button type="button" className="link-button" onClick={() => void invoke("open_virtual_cable_download").catch((reason: unknown) => setError(String(reason)))}>Télécharger VB-CABLE</button></p>
+            : virtualOutput
+              ? <p className="hint">Dans Discord ou votre jeu, choisissez <strong>{virtualOutput.replace("Input", "Output")}</strong> comme microphone.</p>
+              : <p className="hint">Choisissez le câble ci-dessus pour que vos sons sortent dans vos appels.</p>}
+          <div className="routing-state"><span className={`status status-${status.virtualOutputConnected ? "running" : "stopped"}`}><span className="status-dot" />{status.virtualOutputConnected ? `Connecté à ${status.virtualOutputActiveDevice}` : "Non connecté"}</span>
+            <button type="button" className="secondary-button" onClick={() => void refreshOutputs()}>Actualiser la liste</button></div>
+        </section>
         <section className="mix-controls" aria-labelledby="mix-controls-title"><div className="mix-heading"><div><p className="eyebrow">Mixage</p><h2 id="mix-controls-title">Niveaux maîtres</h2></div><span>{Math.round(status.peak * 100)} %</span></div>
           {(["microphone", "soundboard", "master"] as const).map((bus) => <div className="mix-row" key={bus}><label htmlFor={`gain-${bus}`}>{bus === "microphone" ? "Microphone" : bus === "soundboard" ? "Sons" : "Sortie virtuelle"}</label><input id={`gain-${bus}`} type="range" min="0" max="2" step="0.05" value={levels[bus]} onChange={(event) => void changeLevel(bus, Number(event.target.value))} /><output>{Math.round(levels[bus] * 100)} %</output><button type="button" onClick={() => void toggleBusMute(bus)} disabled={!isRunning}>{mutes[bus] ? "Réactiver" : "Couper"}</button></div>)}
           <div className="monitor-control"><div><strong>Écoute locale des sons</strong><span>{status.monitorDeviceName ?? "Sortie par défaut"}{status.monitorRestartCount > 0 ? ` · ${status.monitorRestartCount} reconnexion${status.monitorRestartCount > 1 ? "s" : ""}` : ""}</span></div><button className="secondary-button" type="button" onClick={toggleMonitoring} disabled={!isRunning}>{monitorEnabled ? "Désactiver" : "Activer"}</button></div>
           <div className="mix-row"><label htmlFor="monitor-gain">Volume d’écoute</label><input id="monitor-gain" type="range" min="0" max="2" step="0.05" value={monitorGain} onChange={(event) => void changeMonitorGain(Number(event.target.value))} /><output>{Math.round(monitorGain * 100)} %</output><button type="button" onClick={toggleMonitorMute} disabled={!isRunning || !monitorEnabled}>{monitorMuted ? "Réactiver" : "Couper"}</button></div>
         </section>
-        {isRunning && <dl className="metrics"><div><dt>Format</dt><dd>{status.inputSampleRate ? `${status.inputSampleRate / 1000} kHz` : "—"}</dd></div><div><dt>Écrêtages</dt><dd>{status.clippedSamples}</dd></div><div><dt>File virtuelle</dt><dd>{status.queuedFrames} trames</dd></div><div><dt>Reconnexions</dt><dd>{status.restartCount}</dd></div></dl>}{(error || status.lastError || (monitorEnabled && status.monitorLastError)) && <p className="error-message" role="alert">{error ?? status.lastError ?? status.monitorLastError}</p>}
+        {isRunning && <dl className="metrics"><div><dt>Format</dt><dd>{status.inputSampleRate ? `${status.inputSampleRate / 1000} kHz` : "—"}</dd></div><div><dt>Écrêtages</dt><dd>{status.clippedSamples}</dd></div><div><dt>File virtuelle</dt><dd>{status.queuedFrames} trames</dd></div><div><dt>Reconnexions</dt><dd>{status.restartCount}</dd></div></dl>}{(error || status.lastError || status.virtualOutputLastError || (monitorEnabled && status.monitorLastError)) && <p className="error-message" role="alert">{error ?? status.lastError ?? status.virtualOutputLastError ?? status.monitorLastError}</p>}
       </section></section>
   );
 }
@@ -401,6 +443,6 @@ function AudioPage() {
 export default function App() {
   const [page, setPage] = useState<Page>("library");
   const setSession = useCommunityStore((state) => state.setSession);
-  useEffect(() => { void communityApi.session().then(setSession).catch(() => setSession(null)); }, [setSession]);
-  return <main className="app-shell"><aside className="sidebar"><div className="brand-mark">SLB</div><nav aria-label="Navigation principale"><button className={`nav-item ${page === "library" ? "active" : ""}`} type="button" onClick={() => setPage("library")}>Mes soundboards</button><button className={`nav-item ${page === "audio" ? "active" : ""}`} type="button" onClick={() => setPage("audio")}>Audio</button><button className={`nav-item ${page === "community" ? "active" : ""}`} type="button" onClick={() => setPage("community")}>Communauté</button><button className={`nav-item ${page === "settings" ? "active" : ""}`} type="button" onClick={() => setPage("settings")}>Réglages</button></nav></aside>{page === "library" ? <LibraryPage /> : page === "audio" ? <AudioPage /> : page === "community" ? <CommunityPage /> : <SettingsPage />}</main>;
+  useEffect(() => { if (communityEnabled) void communityApi.session().then(setSession).catch(() => setSession(null)); }, [setSession]);
+  return <main className="app-shell"><aside className="sidebar"><div className="brand-mark">SLB</div><nav aria-label="Navigation principale"><button className={`nav-item ${page === "library" ? "active" : ""}`} type="button" onClick={() => setPage("library")}>Mes soundboards</button><button className={`nav-item ${page === "audio" ? "active" : ""}`} type="button" onClick={() => setPage("audio")}>Audio</button>{communityEnabled && <button className={`nav-item ${page === "community" ? "active" : ""}`} type="button" onClick={() => setPage("community")}>Communauté</button>}<button className={`nav-item ${page === "settings" ? "active" : ""}`} type="button" onClick={() => setPage("settings")}>Réglages</button></nav></aside><UpdateBanner />{page === "library" ? <LibraryPage /> : page === "audio" ? <AudioPage /> : page === "community" && communityEnabled ? <CommunityPage /> : <SettingsPage />}</main>;
 }
