@@ -188,6 +188,12 @@ impl PolyphonicPlayer {
         self.last_paused
     }
 
+    /// Identifiers of the voices currently loaded, newest slots last. Fixed size
+    /// so the audio thread can publish it without allocating.
+    pub(crate) fn active_ids(&self) -> [Option<PlaybackId>; MAX_ACTIVE_VOICES] {
+        array::from_fn(|index| self.voices[index].as_ref().map(|voice| voice.id))
+    }
+
     pub(crate) fn active_voice_count(&self) -> usize {
         self.voices.iter().flatten().count()
     }

@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
 use base64::Engine as _;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use slb_audio_engine::{
     AudioEngine, DeviceCatalog, EngineState, EngineStatus, MixBus, MixerCommand, PlaybackId,
     ReplayPolicy as EngineReplayPolicy, SystemDeviceCatalog, is_virtual_cable, output_device_names,
@@ -17,6 +17,9 @@ use library::{LibraryService, PlaybackProfile, ReplayPolicy, Sound, Soundboard};
 
 struct AudioAppState {
     engine: Mutex<Option<AudioEngine>>,
+    /// Playback identifiers the application triggered, so the status can name the
+    /// sounds the engine currently plays.
+    triggered: Mutex<std::collections::HashMap<u64, String>>,
 }
 
 struct LibraryAppState {
@@ -65,6 +68,7 @@ struct AudioStatusDto {
     playback_total_frames: u64,
     playback_paused: bool,
     active_voices: usize,
+    active_sound_ids: Vec<String>,
     monitor_enabled: bool,
     monitor_muted: bool,
     monitor_gain: f32,
@@ -99,6 +103,7 @@ impl AudioStatusDto {
             playback_total_frames: 0,
             playback_paused: false,
             active_voices: 0,
+            active_sound_ids: Vec::new(),
             monitor_enabled: false,
             monitor_muted: false,
             monitor_gain: 1.0,
@@ -150,6 +155,7 @@ impl From<EngineStatus> for AudioStatusDto {
             playback_total_frames: status.playback_total_frames,
             playback_paused: status.playback_paused,
             active_voices: status.active_voices,
+            active_sound_ids: Vec::new(),
             monitor_enabled: monitor.enabled,
             monitor_muted: monitor.muted,
             monitor_gain: monitor.gain,
@@ -198,12 +204,7 @@ fn launch_engine(
             engine.set_virtual_output_device(device);
         }
     }
-    let enabled = library
-        .lock()
-        .ok()
-        .and_then(|service| service.monitor_enabled().ok())
-        .unwrap_or(true);
-    engine.set_monitor_enabled(enabled);
+    stored_mix_settings(library).apply(&engine);
     Ok(engine)
 }
 
@@ -335,14 +336,25 @@ fn set_virtual_output_device(
 
 #[tauri::command]
 fn audio_status(state: State<'_, AudioAppState>) -> Result<AudioStatusDto, String> {
-    let slot = state
+    let status = state
         .engine
         .lock()
-        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
-    Ok(slot
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?
         .as_ref()
-        .map(|engine| engine.status().into())
-        .unwrap_or_else(AudioStatusDto::stopped))
+        .map(AudioEngine::status);
+    let Some(status) = status else {
+        return Ok(AudioStatusDto::stopped());
+    };
+    let active = status.active_sounds;
+    let mut dto = AudioStatusDto::from(status);
+    if let Ok(triggered) = state.triggered.lock() {
+        dto.active_sound_ids = active
+            .iter()
+            .flatten()
+            .filter_map(|id| triggered.get(&id.0).cloned())
+            .collect();
+    }
+    Ok(dto)
 }
 
 #[tauri::command]
@@ -357,112 +369,115 @@ fn play_reference_sound(state: State<'_, AudioAppState>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn set_microphone_muted(muted: bool, state: State<'_, AudioAppState>) -> Result<(), String> {
-    let slot = state
-        .engine
-        .lock()
-        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
-    slot.as_ref()
-        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?
-        .send_mixer_command(MixerCommand::SetMuted {
-            bus: MixBus::Microphone,
-            muted,
-        })
-        .map_err(|error| error.to_string())
+/// Every level the user controls, persisted as one row and applied as a whole.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct MixSettings {
+    microphone_gain: f32,
+    microphone_muted: bool,
+    soundboard_gain: f32,
+    soundboard_muted: bool,
+    master_gain: f32,
+    master_muted: bool,
+    monitor_enabled: bool,
+    monitor_gain: f32,
+    monitor_muted: bool,
 }
 
-fn mix_bus(bus: &str) -> Result<MixBus, String> {
-    match bus {
-        "microphone" => Ok(MixBus::Microphone),
-        "soundboard" => Ok(MixBus::Soundboard),
-        "master" => Ok(MixBus::Master),
-        _ => Err("Ce canal audio n’existe pas.".to_owned()),
+impl Default for MixSettings {
+    fn default() -> Self {
+        Self {
+            microphone_gain: 1.0,
+            microphone_muted: false,
+            soundboard_gain: 1.0,
+            soundboard_muted: false,
+            master_gain: 1.0,
+            master_muted: false,
+            monitor_enabled: true,
+            monitor_gain: 1.0,
+            monitor_muted: false,
+        }
     }
 }
 
-#[tauri::command]
-fn set_master_gain(bus: String, gain: f32, state: State<'_, AudioAppState>) -> Result<(), String> {
-    if !gain.is_finite() || !(0.0..=2.0).contains(&gain) {
-        return Err("Le niveau demandé n’est pas valide.".to_owned());
+impl MixSettings {
+    fn sanitized(mut self) -> Self {
+        for gain in [
+            &mut self.microphone_gain,
+            &mut self.soundboard_gain,
+            &mut self.master_gain,
+            &mut self.monitor_gain,
+        ] {
+            *gain = if gain.is_finite() {
+                gain.clamp(0.0, 2.0)
+            } else {
+                1.0
+            };
+        }
+        self
     }
-    let slot = state
-        .engine
+
+    fn apply(&self, engine: &AudioEngine) {
+        for (bus, gain, muted) in [
+            (
+                MixBus::Microphone,
+                self.microphone_gain,
+                self.microphone_muted,
+            ),
+            (
+                MixBus::Soundboard,
+                self.soundboard_gain,
+                self.soundboard_muted,
+            ),
+            (MixBus::Master, self.master_gain, self.master_muted),
+        ] {
+            let _ = engine.send_mixer_command(MixerCommand::SetGain { bus, gain });
+            let _ = engine.send_mixer_command(MixerCommand::SetMuted { bus, muted });
+        }
+        let _ = engine.set_monitor_gain(self.monitor_gain);
+        engine.set_monitor_muted(self.monitor_muted);
+        engine.set_monitor_enabled(self.monitor_enabled);
+    }
+}
+
+fn stored_mix_settings(library: &Mutex<LibraryService>) -> MixSettings {
+    library
         .lock()
-        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
-    slot.as_ref()
-        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?
-        .send_mixer_command(MixerCommand::SetGain {
-            bus: mix_bus(&bus)?,
-            gain,
-        })
-        .map_err(|error| error.to_string())
+        .ok()
+        .and_then(|service| service.mix_settings().ok().flatten())
+        .and_then(|value| serde_json::from_str::<MixSettings>(&value).ok())
+        .unwrap_or_default()
+        .sanitized()
 }
 
 #[tauri::command]
-fn set_master_muted(
-    bus: String,
-    muted: bool,
-    state: State<'_, AudioAppState>,
-) -> Result<(), String> {
-    let slot = state
-        .engine
-        .lock()
-        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
-    slot.as_ref()
-        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?
-        .send_mixer_command(MixerCommand::SetMuted {
-            bus: mix_bus(&bus)?,
-            muted,
-        })
-        .map_err(|error| error.to_string())
+fn mix_settings(library: State<'_, LibraryAppState>) -> MixSettings {
+    stored_mix_settings(&library.service)
 }
 
-/// Persists the monitoring choice so the next launch honours it.
+/// Persists every level at once and applies them to the running engine.
 #[tauri::command]
-fn set_monitoring(
-    enabled: bool,
+fn set_mix_settings(
+    settings: MixSettings,
     state: State<'_, AudioAppState>,
     library: State<'_, LibraryAppState>,
 ) -> Result<(), String> {
+    let settings = settings.sanitized();
+    let value = serde_json::to_string(&settings).map_err(|error| error.to_string())?;
     library
         .service
         .lock()
         .map_err(|_| "La bibliotheque est indisponible.".to_owned())?
-        .set_monitor_enabled(enabled)
+        .set_mix_settings(&value)
         .map_err(|error| error.to_string())?;
-    let slot = state
+    if let Some(engine) = state
         .engine
         .lock()
-        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
-    if let Some(engine) = slot.as_ref() {
-        engine.set_monitor_enabled(enabled);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn set_monitor_gain(gain: f32, state: State<'_, AudioAppState>) -> Result<(), String> {
-    let slot = state
-        .engine
-        .lock()
-        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
-    slot.as_ref()
-        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?
-        .set_monitor_gain(gain)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn set_monitor_muted(muted: bool, state: State<'_, AudioAppState>) -> Result<(), String> {
-    let slot = state
-        .engine
-        .lock()
-        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
-    let engine = slot
+        .map_err(|_| "Le moteur audio est indisponible.".to_owned())?
         .as_ref()
-        .ok_or_else(|| "Démarrez d'abord le microphone virtuel.".to_owned())?;
-    engine.set_monitor_muted(muted);
+    {
+        settings.apply(engine);
+    }
     Ok(())
 }
 
@@ -805,6 +820,9 @@ fn play_sound(
         .lock()
         .map_err(|_| "Le moteur audio est indisponible.".to_owned())?;
     ensure_engine(&mut slot, &library_state.service)?;
+    if let Ok(mut triggered) = audio_state.triggered.lock() {
+        triggered.insert(playback_id(&sound.id).0, sound.id.clone());
+    }
     slot.as_ref()
         .expect("audio engine was initialized")
         .trigger_sound(
@@ -923,6 +941,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AudioAppState {
             engine: Mutex::new(None),
+            triggered: Mutex::new(std::collections::HashMap::new()),
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -978,16 +997,12 @@ pub fn run() {
             start_audio,
             audio_status,
             play_reference_sound,
-            set_microphone_muted,
-            set_master_gain,
-            set_master_muted,
-            set_monitoring,
+            mix_settings,
+            set_mix_settings,
             list_output_devices,
             virtual_output_device,
             set_virtual_output_device,
             open_virtual_cable_download,
-            set_monitor_gain,
-            set_monitor_muted,
             library_snapshot,
             select_soundboard,
             create_soundboard,
@@ -1026,4 +1041,27 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MixSettings;
+
+    #[test]
+    fn mix_settings_fill_missing_fields_and_clamp_gains() {
+        let stored: MixSettings = serde_json::from_str(r#"{"soundboardGain":0.4}"#).unwrap();
+        assert_eq!(stored.soundboard_gain, 0.4);
+        assert_eq!(stored.master_gain, 1.0);
+        assert!(stored.monitor_enabled);
+
+        let wild: MixSettings = serde_json::from_str(r#"{"masterGain":9.0,"monitorGain":-2.0}"#)
+            .unwrap();
+        let safe = wild.sanitized();
+        assert_eq!(safe.master_gain, 2.0);
+        assert_eq!(safe.monitor_gain, 0.0);
+
+        let round_trip: MixSettings =
+            serde_json::from_str(&serde_json::to_string(&safe).unwrap()).unwrap();
+        assert_eq!(round_trip.master_gain, 2.0);
+    }
 }
