@@ -1,6 +1,6 @@
 [package]
 name = "slbs-soundboard"
-version = "0.3.0"
+version = "0.4.0"
 description = "Windows soundboard manager with a virtual microphone"
 authors = ["SLB"]
 edition = "2021"
