@@ -103,6 +103,7 @@ enum EngineCommand {
         gain: f32,
         policy: ReplayPolicy,
     },
+    StopSound(PlaybackId),
     StopAllSounds,
 }
 
@@ -206,6 +207,13 @@ impl AudioEngine {
             gain,
             policy,
         })?;
+        Ok(())
+    }
+
+    /// Stops every voice of one sound without touching the others.
+    pub fn stop_sound(&self, id: PlaybackId) -> Result<(), EngineError> {
+        self.drain_retired_sounds();
+        self.engine_commands.try_send(EngineCommand::StopSound(id))?;
         Ok(())
     }
 
@@ -507,6 +515,12 @@ impl EngineRuntime {
                     policy,
                 } => {
                     let mut retired = self.player.trigger(id, samples, gain, policy);
+                    for buffer in retired.drain() {
+                        let _ = self.retired_sounds.try_send(buffer);
+                    }
+                }
+                EngineCommand::StopSound(id) => {
+                    let mut retired = self.player.stop(id);
                     for buffer in retired.drain() {
                         let _ = self.retired_sounds.try_send(buffer);
                     }
