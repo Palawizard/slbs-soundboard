@@ -376,6 +376,7 @@ struct EngineRuntime {
 }
 
 impl EngineRuntime {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         device_id: Option<String>,
         engine_commands: CommandReceiver<EngineCommand>,
