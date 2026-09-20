@@ -10,6 +10,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   Channel: class { onmessage?: (value: unknown) => void },
 }));
+// The community surface ships disabled; these tests cover it as it behaves once
+// the server is deployed and VITE_SLB_COMMUNITY is set at build time.
+vi.mock("./features", () => ({ communityEnabled: true, driverEnabled: true }));
+vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn(async () => null) }));
+vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: vi.fn(async () => undefined), unregister: vi.fn(async () => undefined) }));
 
