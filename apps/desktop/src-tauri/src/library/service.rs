@@ -202,6 +202,20 @@ impl LibraryService {
         self.backup()
     }
 
+    /// Output device carrying the virtual microphone, empty when routing is off.
+    pub fn virtual_output_device(&self) -> Result<Option<String>, LibraryError> {
+        Ok(self
+            .repository
+            .setting("virtual_output_device")?
+            .filter(|value| !value.is_empty()))
+    }
+
+    pub fn set_virtual_output_device(&mut self, device: Option<&str>) -> Result<(), LibraryError> {
+        self.repository
+            .set_setting("virtual_output_device", device.unwrap_or_default())?;
+        self.backup()
+    }
+
     pub fn diagnostics_enabled(&self) -> Result<bool, LibraryError> {
         Ok(self.repository.setting("diagnostics_enabled")?.as_deref() != Some("false"))
     }

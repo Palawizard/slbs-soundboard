@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use crate::monitor::{MonitorOutput, MonitorProducer};
+use crate::virtual_sink::{VirtualSink, VirtualSinkProducer};
 use crate::playback::PolyphonicPlayer;
 use crate::{
     CHANNELS, CaptureError, CaptureSource, DEFAULT_CAPACITY_FRAMES, IpcError, IpcHealth, MixBus,
@@ -43,6 +44,7 @@ pub struct EngineStatus {
     pub playback_paused: bool,
     pub active_voices: usize,
     pub monitor: crate::MonitorStatus,
+    pub virtual_sink: crate::VirtualSinkStatus,
 }
 
 impl EngineStatus {
@@ -61,6 +63,7 @@ impl EngineStatus {
             playback_paused: false,
             active_voices: 0,
             monitor: crate::MonitorStatus::default(),
+            virtual_sink: crate::VirtualSinkStatus::default(),
         }
     }
 }
@@ -108,6 +111,7 @@ pub struct AudioEngine {
     retired_sounds: CommandReceiver<Arc<[f32]>>,
     mixer_commands: CommandSender<MixerCommand>,
     monitor: MonitorOutput,
+    virtual_sink: VirtualSink,
     status: Arc<Mutex<EngineStatus>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -120,6 +124,8 @@ impl AudioEngine {
         let (mixer_commands, mixer_receiver) = bounded_command_queue(COMMAND_CAPACITY);
         let monitor = MonitorOutput::start().map_err(|_| EngineError::ThreadStart)?;
         let monitor_producer = monitor.producer();
+        let virtual_sink = VirtualSink::start().map_err(|_| EngineError::ThreadStart)?;
+        let virtual_sink_producer = virtual_sink.producer();
         let status = Arc::new(Mutex::new(EngineStatus::starting(device_id.clone())));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
@@ -135,6 +141,7 @@ impl AudioEngine {
                     retired_sender,
                     mixer_receiver,
                     monitor_producer,
+                    virtual_sink_producer,
                     thread_status,
                     thread_stop,
                 );
@@ -156,6 +163,7 @@ impl AudioEngine {
                 retired_sounds,
                 mixer_commands,
                 monitor,
+                virtual_sink,
                 status,
                 stop,
                 thread: Some(audio_thread),
@@ -240,6 +248,17 @@ impl AudioEngine {
         Ok(())
     }
 
+    /// Routes the final microphone-plus-soundboard mix to `device`, or stops
+    /// routing when `None`. Selecting a loopback cable turns that cable's capture
+    /// side into the virtual microphone other applications record from.
+    pub fn set_virtual_output_device(&self, device: Option<String>) {
+        self.virtual_sink.set_device(device);
+    }
+
+    pub fn virtual_sink_status(&self) -> crate::VirtualSinkStatus {
+        self.virtual_sink.status()
+    }
+
     pub fn status(&self) -> EngineStatus {
         self.drain_retired_sounds();
         let mut status = self
@@ -248,6 +267,7 @@ impl AudioEngine {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         status.monitor = self.monitor.status();
+        status.virtual_sink = self.virtual_sink.status();
         status
     }
 
@@ -343,6 +363,7 @@ struct EngineRuntime {
     retired_sounds: CommandSender<Arc<[f32]>>,
     mixer: RealtimeMixer,
     monitor: MonitorProducer,
+    virtual_sink: VirtualSinkProducer,
     tone: ReferenceTone,
     player: PolyphonicPlayer,
     soundboard: Vec<f32>,
@@ -361,6 +382,7 @@ impl EngineRuntime {
         retired_sounds: CommandSender<Arc<[f32]>>,
         mixer_commands: CommandReceiver<MixerCommand>,
         monitor: MonitorProducer,
+        virtual_sink: VirtualSinkProducer,
         status: Arc<Mutex<EngineStatus>>,
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Self, EngineError> {
@@ -376,6 +398,7 @@ impl EngineRuntime {
             retired_sounds,
             mixer: RealtimeMixer::new(CHANNELS as usize, mixer_commands),
             monitor,
+            virtual_sink,
             tone: ReferenceTone::new(),
             player: PolyphonicPlayer::new(),
             soundboard: vec![0.0; sample_capacity],
@@ -415,6 +438,7 @@ impl EngineRuntime {
             &self.soundboard[..samples],
             &mut self.mixed[..samples],
         );
+        self.virtual_sink.push(&self.mixed[..samples]);
         let _ = self.writer.write(&self.mixed[..samples]);
     }
 
@@ -427,6 +451,7 @@ impl EngineRuntime {
             &self.soundboard[..samples],
             &mut self.mixed[..samples],
         );
+        self.virtual_sink.push(&self.mixed[..samples]);
         let _ = self.writer.write(&self.mixed[..samples]);
     }
 
