@@ -40,6 +40,13 @@ démarrer. Vos sons sont aussi joués dans votre sortie audio habituelle pour qu
 vous les entendiez en direct ; l'onglet **Audio** permet d'en régler le volume
 ou de couper cette écoute.
 
+## Arrière-plan et démarrage
+
+Fermer la fenêtre laisse l'application active dans la zone de notification :
+les raccourcis globaux continuent de fonctionner. L'icône ouvre la fenêtre et
+propose « Quitter ». L'onglet **Réglages** permet de lancer l'application au
+démarrage de Windows.
+
 Un pilote de capture noyau est présent dans `native/driver/`. Il exige une
 signature Microsoft pour être distribué, il n'est donc pas utilisé par défaut.
 Compilez avec `VITE_SLB_DRIVER=true` pour retrouver ses contrôles.

@@ -230,6 +230,17 @@ impl LibraryService {
         self.backup()
     }
 
+    /// Local monitoring of the triggered sounds, on unless the user turned it off.
+    pub fn monitor_enabled(&self) -> Result<bool, LibraryError> {
+        Ok(self.repository.setting("monitor_enabled")?.as_deref() != Some("false"))
+    }
+
+    pub fn set_monitor_enabled(&mut self, enabled: bool) -> Result<(), LibraryError> {
+        self.repository
+            .set_setting("monitor_enabled", if enabled { "true" } else { "false" })?;
+        self.backup()
+    }
+
     pub fn diagnostics_enabled(&self) -> Result<bool, LibraryError> {
         Ok(self.repository.setting("diagnostics_enabled")?.as_deref() != Some("false"))
     }

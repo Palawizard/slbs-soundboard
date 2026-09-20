@@ -124,6 +124,13 @@ impl PolyphonicPlayer {
         retired
     }
 
+    pub(crate) fn stop(&mut self, id: PlaybackId) -> RetiredBuffers {
+        let mut retired = RetiredBuffers::new();
+        self.retire_matching(id, &mut retired);
+        self.clear_last(id);
+        retired
+    }
+
     pub(crate) fn stop_all(&mut self) -> RetiredBuffers {
         let mut retired = RetiredBuffers::new();
         for slot in &mut self.voices {
@@ -280,6 +287,21 @@ mod tests {
         assert!(!player.paused());
         player.render(&mut output);
         assert_eq!(player.played_frames(), 4);
+    }
+
+    #[test]
+    fn stopping_one_sound_leaves_the_others_playing() {
+        let mut player = PolyphonicPlayer::new();
+        player.trigger(PlaybackId(1), sound(0.2, 8), 1.0, ReplayPolicy::Overlap);
+        player.trigger(PlaybackId(2), sound(0.3, 8), 1.0, ReplayPolicy::Overlap);
+        player.stop(PlaybackId(1));
+        assert_eq!(player.active_voice_count(), 1);
+        let mut output = [0.0; 4];
+        player.render(&mut output);
+        assert_eq!(output, [0.3; 4]);
+        player.stop(PlaybackId(2));
+        assert_eq!(player.active_voice_count(), 0);
+        assert_eq!(player.total_frames(), 0);
     }
 
     #[test]
