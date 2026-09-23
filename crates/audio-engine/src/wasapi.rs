@@ -15,13 +15,22 @@ use windows::{
                 CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
                 CoUninitialize, STGM_READ,
             },
-            Threading::{CreateEventW, WaitForSingleObject},
+            Threading::{
+                CreateEventW, GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
+                WaitForSingleObject,
+            },
         },
     },
     core::{GUID, HRESULT, PCWSTR, PWSTR},
 };
 
 use crate::{AudioDevice, AudioFormat, CaptureError, CaptureSource, DeviceCatalog, SampleEncoding};
+
+/// Raises the calling thread above game and application threads, as `cpal` does
+/// for its output streams, so capture is not starved under heavy CPU load.
+pub(crate) fn boost_current_thread_priority() {
+    let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) };
+}
 
 const WAVE_FORMAT_IEEE_FLOAT: u16 = 0x0003;
 const WAVE_FORMAT_EXTENSIBLE: u16 = 0xfffe;
@@ -236,20 +245,25 @@ impl CaptureSource for WasapiCaptureSource {
             });
         }
 
-        let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as u32;
-        match unsafe { WaitForSingleObject(self.event.0, timeout_ms) } {
-            WAIT_OBJECT_0 => {}
-            WAIT_TIMEOUT => return Ok(0),
-            result => {
-                return Err(CaptureError::Platform(format!(
-                    "audio event wait failed with status {}",
-                    result.0
-                )));
-            }
-        }
-
-        let packet_frames =
+        // Packets left over after a stall are read without waiting for another
+        // event; otherwise the backlog never drains and the device buffer overflows.
+        let mut packet_frames =
             unsafe { self.capture_client.GetNextPacketSize() }.map_err(platform_error)?;
+        if packet_frames == 0 {
+            let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as u32;
+            match unsafe { WaitForSingleObject(self.event.0, timeout_ms) } {
+                WAIT_OBJECT_0 => {}
+                WAIT_TIMEOUT => return Ok(0),
+                result => {
+                    return Err(CaptureError::Platform(format!(
+                        "audio event wait failed with status {}",
+                        result.0
+                    )));
+                }
+            }
+            packet_frames =
+                unsafe { self.capture_client.GetNextPacketSize() }.map_err(platform_error)?;
+        }
         if packet_frames == 0 {
             return Ok(0);
         }
