@@ -138,6 +138,7 @@ impl AudioEngine {
         let audio_thread = thread::Builder::new()
             .name("slb-audio-engine".to_owned())
             .spawn(move || {
+                crate::wasapi::boost_current_thread_priority();
                 let startup = EngineRuntime::new(
                     device_id,
                     engine_receiver,
