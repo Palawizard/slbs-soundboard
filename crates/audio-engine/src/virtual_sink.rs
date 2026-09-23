@@ -19,6 +19,17 @@ const RECOVERY_DELAY: Duration = Duration::from_millis(500);
 const IDLE_DELAY: Duration = Duration::from_millis(250);
 const DEVICE_WATCH_INTERVAL: Duration = Duration::from_millis(1000);
 
+/// Queue depth the reader steers towards. The microphone and the cable run on
+/// independent clocks, so without steering the queue slowly drains (choppy,
+/// robotic voice) or fills up (growing delay, dropped frames).
+const TARGET_QUEUED_FRAMES: usize = SAMPLE_RATE as usize * 40 / 1_000;
+/// Above this depth the backlog is skipped at once instead of slowly caught up.
+const MAX_QUEUED_FRAMES: usize = TARGET_QUEUED_FRAMES * 4;
+/// Largest playback speed correction, 0.2 %, far below audible pitch change.
+const MAX_RATE_CORRECTION: f64 = 0.002;
+/// Per-frame smoothing of the measured depth, about a 100 ms time constant.
+const FILL_SMOOTHING: f64 = 1.0 / 4_800.0;
+
 /// Substrings identifying loopback cables usable as a virtual microphone.
 const KNOWN_CABLE_MARKERS: [&str; 4] = ["cable input", "vb-audio", "voicemeeter", "slb virtual"];
 
@@ -279,7 +290,10 @@ struct VirtualSinkReader {
     next: [f32; 2],
     phase: f64,
     source_frames_per_output_frame: f64,
-    primed: bool,
+    /// Outputs silence until the queue holds `TARGET_QUEUED_FRAMES` again, so an
+    /// empty queue gives one short gap instead of alternating sound and silence.
+    buffering: bool,
+    smoothed_fill: f64,
 }
 
 impl VirtualSinkReader {
@@ -290,18 +304,36 @@ impl VirtualSinkReader {
             next: [0.0; 2],
             phase: 0.0,
             source_frames_per_output_frame: SAMPLE_RATE as f64 / output_rate.max(1) as f64,
-            primed: false,
+            buffering: true,
+            smoothed_fill: TARGET_QUEUED_FRAMES as f64,
         }
     }
 
-    fn pop_frame(&self) -> [f32; 2] {
+    fn queued_frames(&self) -> usize {
+        self.shared.samples.len() / CHANNELS as usize
+    }
+
+    fn pop_frame(&self) -> Option<[f32; 2]> {
         match (self.shared.samples.pop(), self.shared.samples.pop()) {
-            (Some(left), Some(right)) => [left, right],
-            _ => {
-                self.shared.underrun_frames.fetch_add(1, Ordering::Relaxed);
-                [0.0; 2]
-            }
+            (Some(left), Some(right)) => Some([left, right]),
+            _ => None,
         }
+    }
+
+    fn skip_backlog(&self) {
+        for _ in TARGET_QUEUED_FRAMES..self.queued_frames() {
+            self.shared.dropped_frames.fetch_add(1, Ordering::Relaxed);
+            let _ = self.pop_frame();
+        }
+    }
+
+    fn step(&mut self) -> f64 {
+        let queued = self.queued_frames() as f64;
+        self.smoothed_fill += (queued - self.smoothed_fill) * FILL_SMOOTHING;
+        let target = TARGET_QUEUED_FRAMES as f64;
+        let correction = ((self.smoothed_fill - target) / target * MAX_RATE_CORRECTION)
+            .clamp(-MAX_RATE_CORRECTION, MAX_RATE_CORRECTION);
+        self.source_frames_per_output_frame * (1.0 + correction)
     }
 }
 
@@ -310,21 +342,39 @@ impl FrameSource for VirtualSinkReader {
         if !self.shared.enabled.load(Ordering::Relaxed) {
             return [0.0; 2];
         }
-        if !self.primed {
-            self.current = self.pop_frame();
-            self.next = self.pop_frame();
-            self.primed = true;
+        if self.buffering {
+            if self.queued_frames() < TARGET_QUEUED_FRAMES {
+                self.shared.underrun_frames.fetch_add(1, Ordering::Relaxed);
+                return [0.0; 2];
+            }
+            self.skip_backlog();
+            let (Some(current), Some(next)) = (self.pop_frame(), self.pop_frame()) else {
+                return [0.0; 2];
+            };
+            (self.current, self.next) = (current, next);
+            self.phase = 0.0;
+            self.smoothed_fill = TARGET_QUEUED_FRAMES as f64;
+            self.buffering = false;
         }
         let phase = self.phase as f32;
         let result = [
             self.current[0] + (self.next[0] - self.current[0]) * phase,
             self.current[1] + (self.next[1] - self.current[1]) * phase,
         ];
-        self.phase += self.source_frames_per_output_frame;
+        self.phase += self.step();
         while self.phase >= 1.0 {
             self.current = self.next;
-            self.next = self.pop_frame();
+            match self.pop_frame() {
+                Some(frame) => self.next = frame,
+                None => {
+                    self.buffering = true;
+                    break;
+                }
+            }
             self.phase -= 1.0;
+        }
+        if self.queued_frames() > MAX_QUEUED_FRAMES {
+            self.skip_backlog();
         }
         [result[0].clamp(-1.0, 1.0), result[1].clamp(-1.0, 1.0)]
     }
@@ -390,11 +440,48 @@ mod tests {
     fn reader_passes_the_master_mix_through_without_extra_gain() {
         let shared = Arc::new(VirtualSinkShared::new());
         shared.enabled.store(true, Ordering::Relaxed);
-        for sample in [0.5, -0.5, 0.5, -0.5] {
-            shared.samples.push(sample).unwrap();
+        for _ in 0..TARGET_QUEUED_FRAMES {
+            shared.samples.push(0.5).unwrap();
+            shared.samples.push(-0.5).unwrap();
         }
         let mut reader = VirtualSinkReader::new(shared, SAMPLE_RATE);
         assert_eq!(reader.next_frame(), [0.5, -0.5]);
+    }
+
+    #[test]
+    fn reader_waits_for_the_target_depth_after_running_dry() {
+        let shared = Arc::new(VirtualSinkShared::new());
+        shared.enabled.store(true, Ordering::Relaxed);
+        let producer = VirtualSinkProducer {
+            shared: Arc::clone(&shared),
+        };
+        let mut reader = VirtualSinkReader::new(Arc::clone(&shared), SAMPLE_RATE);
+        producer.push(&[0.5; 20]);
+        assert_eq!(reader.next_frame(), [0.0, 0.0]);
+        producer.push(&vec![0.5; TARGET_QUEUED_FRAMES * 2]);
+        assert_eq!(reader.next_frame(), [0.5, 0.5]);
+    }
+
+    #[test]
+    fn reader_keeps_the_delay_bounded_when_the_queue_piles_up() {
+        let shared = Arc::new(VirtualSinkShared::new());
+        shared.enabled.store(true, Ordering::Relaxed);
+        let producer = VirtualSinkProducer {
+            shared: Arc::clone(&shared),
+        };
+        let mut reader = VirtualSinkReader::new(Arc::clone(&shared), SAMPLE_RATE);
+        producer.push(&vec![0.1; SINK_CAPACITY_SAMPLES]);
+        reader.next_frame();
+        assert!(reader.queued_frames() <= TARGET_QUEUED_FRAMES);
+        // A producer slightly faster than the device must not grow the delay.
+        for _ in 0..SAMPLE_RATE as usize * 10 / 480 {
+            producer.push(&[0.1; 482 * 2]);
+            for _ in 0..480 {
+                reader.next_frame();
+            }
+        }
+        assert!(reader.queued_frames() <= MAX_QUEUED_FRAMES);
+        assert!(!reader.buffering);
     }
 
     #[test]
