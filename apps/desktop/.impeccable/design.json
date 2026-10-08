@@ -1,0 +1,515 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-08T00:00:00Z",
+  "title": "Design System: SLB's Soundboard",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Ardoise profonde",
+        "canonical": "oklch(0.215 0.024 220)",
+        "tonalRamp": [
+          "oklch(0.15 0.024 220)",
+          "oklch(0.26 0.024 220)",
+          "oklch(0.37 0.024 220)",
+          "oklch(0.48 0.024 220)",
+          "oklch(0.59 0.024 220)",
+          "oklch(0.70 0.024 220)",
+          "oklch(0.82 0.024 220)",
+          "oklch(0.95 0.024 220)"
+        ]
+      },
+      "ground-deep": {
+        "role": "neutral",
+        "displayName": "Ardoise de fond de puits",
+        "canonical": "oklch(0.18 0.02 220)",
+        "tonalRamp": [
+          "oklch(0.15 0.02 220)",
+          "oklch(0.26 0.02 220)",
+          "oklch(0.37 0.02 220)",
+          "oklch(0.48 0.02 220)",
+          "oklch(0.59 0.02 220)",
+          "oklch(0.70 0.02 220)",
+          "oklch(0.82 0.02 220)",
+          "oklch(0.95 0.02 220)"
+        ]
+      },
+      "rail": {
+        "role": "neutral",
+        "displayName": "Ardoise du rail",
+        "canonical": "oklch(0.188 0.022 220)",
+        "tonalRamp": [
+          "oklch(0.15 0.022 220)",
+          "oklch(0.26 0.022 220)",
+          "oklch(0.37 0.022 220)",
+          "oklch(0.48 0.022 220)",
+          "oklch(0.59 0.022 220)",
+          "oklch(0.70 0.022 220)",
+          "oklch(0.82 0.022 220)",
+          "oklch(0.95 0.022 220)"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Ardoise de panneau",
+        "canonical": "oklch(0.245 0.026 218)",
+        "tonalRamp": [
+          "oklch(0.15 0.026 218)",
+          "oklch(0.26 0.026 218)",
+          "oklch(0.37 0.026 218)",
+          "oklch(0.48 0.026 218)",
+          "oklch(0.59 0.026 218)",
+          "oklch(0.70 0.026 218)",
+          "oklch(0.82 0.026 218)",
+          "oklch(0.95 0.026 218)"
+        ]
+      },
+      "slot": {
+        "role": "neutral",
+        "displayName": "Case",
+        "canonical": "oklch(0.275 0.028 216)",
+        "tonalRamp": [
+          "oklch(0.15 0.028 216)",
+          "oklch(0.26 0.028 216)",
+          "oklch(0.37 0.028 216)",
+          "oklch(0.48 0.028 216)",
+          "oklch(0.59 0.028 216)",
+          "oklch(0.70 0.028 216)",
+          "oklch(0.82 0.028 216)",
+          "oklch(0.95 0.028 216)"
+        ]
+      },
+      "slot-hover": {
+        "role": "neutral",
+        "displayName": "Case survolée",
+        "canonical": "oklch(0.31 0.03 216)",
+        "tonalRamp": [
+          "oklch(0.15 0.03 216)",
+          "oklch(0.26 0.03 216)",
+          "oklch(0.37 0.03 216)",
+          "oklch(0.48 0.03 216)",
+          "oklch(0.59 0.03 216)",
+          "oklch(0.70 0.03 216)",
+          "oklch(0.82 0.03 216)",
+          "oklch(0.95 0.03 216)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Filet",
+        "canonical": "oklch(0.335 0.026 216)",
+        "tonalRamp": [
+          "oklch(0.15 0.026 216)",
+          "oklch(0.26 0.026 216)",
+          "oklch(0.37 0.026 216)",
+          "oklch(0.48 0.026 216)",
+          "oklch(0.59 0.026 216)",
+          "oklch(0.70 0.026 216)",
+          "oklch(0.82 0.026 216)",
+          "oklch(0.95 0.026 216)"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Filet appuyé",
+        "canonical": "oklch(0.43 0.03 214)",
+        "tonalRamp": [
+          "oklch(0.15 0.03 214)",
+          "oklch(0.26 0.03 214)",
+          "oklch(0.37 0.03 214)",
+          "oklch(0.48 0.03 214)",
+          "oklch(0.59 0.03 214)",
+          "oklch(0.70 0.03 214)",
+          "oklch(0.82 0.03 214)",
+          "oklch(0.95 0.03 214)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Blanc os",
+        "canonical": "oklch(0.95 0.013 85)",
+        "tonalRamp": [
+          "oklch(0.15 0.013 85)",
+          "oklch(0.26 0.013 85)",
+          "oklch(0.37 0.013 85)",
+          "oklch(0.48 0.013 85)",
+          "oklch(0.59 0.013 85)",
+          "oklch(0.70 0.013 85)",
+          "oklch(0.82 0.013 85)",
+          "oklch(0.95 0.013 85)"
+        ]
+      },
+      "text-2": {
+        "role": "neutral",
+        "displayName": "Texte secondaire",
+        "canonical": "oklch(0.83 0.018 200)",
+        "tonalRamp": [
+          "oklch(0.15 0.018 200)",
+          "oklch(0.26 0.018 200)",
+          "oklch(0.37 0.018 200)",
+          "oklch(0.48 0.018 200)",
+          "oklch(0.59 0.018 200)",
+          "oklch(0.70 0.018 200)",
+          "oklch(0.82 0.018 200)",
+          "oklch(0.95 0.018 200)"
+        ]
+      },
+      "text-3": {
+        "role": "neutral",
+        "displayName": "Texte tertiaire",
+        "canonical": "oklch(0.72 0.022 205)",
+        "tonalRamp": [
+          "oklch(0.15 0.022 205)",
+          "oklch(0.26 0.022 205)",
+          "oklch(0.37 0.022 205)",
+          "oklch(0.48 0.022 205)",
+          "oklch(0.59 0.022 205)",
+          "oklch(0.70 0.022 205)",
+          "oklch(0.82 0.022 205)",
+          "oklch(0.95 0.022 205)"
+        ]
+      },
+      "amber": {
+        "role": "primary",
+        "displayName": "Ambre de recharge",
+        "canonical": "oklch(0.8 0.15 68)",
+        "tonalRamp": [
+          "oklch(0.15 0.15 68)",
+          "oklch(0.26 0.15 68)",
+          "oklch(0.37 0.15 68)",
+          "oklch(0.48 0.15 68)",
+          "oklch(0.59 0.15 68)",
+          "oklch(0.70 0.15 68)",
+          "oklch(0.82 0.15 68)",
+          "oklch(0.95 0.15 68)"
+        ]
+      },
+      "amber-veil": {
+        "role": "primary",
+        "displayName": "Voile d'ambre",
+        "canonical": "oklch(0.8 0.15 68 / 0.42)",
+        "tonalRamp": [
+          "oklch(0.15 0.15 68)",
+          "oklch(0.26 0.15 68)",
+          "oklch(0.37 0.15 68)",
+          "oklch(0.48 0.15 68)",
+          "oklch(0.59 0.15 68)",
+          "oklch(0.70 0.15 68)",
+          "oklch(0.82 0.15 68)",
+          "oklch(0.95 0.15 68)"
+        ]
+      },
+      "sage": {
+        "role": "tertiary",
+        "displayName": "Sauge en ligne",
+        "canonical": "oklch(0.79 0.11 158)",
+        "tonalRamp": [
+          "oklch(0.15 0.11 158)",
+          "oklch(0.26 0.11 158)",
+          "oklch(0.37 0.11 158)",
+          "oklch(0.48 0.11 158)",
+          "oklch(0.59 0.11 158)",
+          "oklch(0.70 0.11 158)",
+          "oklch(0.82 0.11 158)",
+          "oklch(0.95 0.11 158)"
+        ]
+      },
+      "warn": {
+        "role": "tertiary",
+        "displayName": "Jaune d'alerte",
+        "canonical": "oklch(0.85 0.13 95)",
+        "tonalRamp": [
+          "oklch(0.15 0.13 95)",
+          "oklch(0.26 0.13 95)",
+          "oklch(0.37 0.13 95)",
+          "oklch(0.48 0.13 95)",
+          "oklch(0.59 0.13 95)",
+          "oklch(0.70 0.13 95)",
+          "oklch(0.82 0.13 95)",
+          "oklch(0.95 0.13 95)"
+        ]
+      },
+      "brick": {
+        "role": "secondary",
+        "displayName": "Brique",
+        "canonical": "oklch(0.52 0.16 32)",
+        "tonalRamp": [
+          "oklch(0.15 0.16 32)",
+          "oklch(0.26 0.16 32)",
+          "oklch(0.37 0.16 32)",
+          "oklch(0.48 0.16 32)",
+          "oklch(0.59 0.16 32)",
+          "oklch(0.70 0.16 32)",
+          "oklch(0.82 0.16 32)",
+          "oklch(0.95 0.16 32)"
+        ]
+      },
+      "brick-hover": {
+        "role": "secondary",
+        "displayName": "Brique survolée",
+        "canonical": "oklch(0.57 0.17 32)",
+        "tonalRamp": [
+          "oklch(0.15 0.17 32)",
+          "oklch(0.26 0.17 32)",
+          "oklch(0.37 0.17 32)",
+          "oklch(0.48 0.17 32)",
+          "oklch(0.59 0.17 32)",
+          "oklch(0.70 0.17 32)",
+          "oklch(0.82 0.17 32)",
+          "oklch(0.95 0.17 32)"
+        ]
+      },
+      "brick-text": {
+        "role": "secondary",
+        "displayName": "Texte brique",
+        "canonical": "oklch(0.8 0.11 32)",
+        "tonalRamp": [
+          "oklch(0.15 0.11 32)",
+          "oklch(0.26 0.11 32)",
+          "oklch(0.37 0.11 32)",
+          "oklch(0.48 0.11 32)",
+          "oklch(0.59 0.11 32)",
+          "oklch(0.70 0.11 32)",
+          "oklch(0.82 0.11 32)",
+          "oklch(0.95 0.11 32)"
+        ]
+      },
+      "selection": {
+        "role": "neutral",
+        "displayName": "Sélection",
+        "canonical": "oklch(0.47 0.06 212)",
+        "tonalRamp": [
+          "oklch(0.15 0.06 212)",
+          "oklch(0.26 0.06 212)",
+          "oklch(0.37 0.06 212)",
+          "oklch(0.48 0.06 212)",
+          "oklch(0.59 0.06 212)",
+          "oklch(0.70 0.06 212)",
+          "oklch(0.82 0.06 212)",
+          "oklch(0.95 0.06 212)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Titre de page",
+        "purpose": "Titres des pages Audio, Réglages, Communauté."
+      },
+      "title": {
+        "displayName": "Titre de section",
+        "purpose": "Sections de page et en-tête de l'inspecteur."
+      },
+      "body": {
+        "displayName": "Texte courant",
+        "purpose": "Interface et paragraphes (64-68ch)."
+      },
+      "slot-title": {
+        "displayName": "Nom de son",
+        "purpose": "Titre sous chaque case, tronqué sur une ligne."
+      },
+      "label": {
+        "displayName": "Libellé",
+        "purpose": "Libellés de champs, bascules, bandeau d'état."
+      },
+      "rail-label": {
+        "displayName": "Libellé de rail",
+        "purpose": "Libellés courts sous les icônes du rail."
+      },
+      "figure": {
+        "displayName": "Chiffres",
+        "purpose": "Durées, pourcentages, compteurs, lectures moteur ; chiffres tabulaires."
+      },
+      "keycap": {
+        "displayName": "Touche gravée",
+        "purpose": "Raccourcis gravés sur les cases."
+      }
+    },
+    "shadows": [
+      {
+        "name": "menu",
+        "value": "0 12px 30px oklch(0.1 0.02 220 / 0.55)",
+        "purpose": "Menu de soundboard flottant."
+      },
+      {
+        "name": "banner",
+        "value": "0 14px 34px oklch(0.1 0.02 220 / 0.55)",
+        "purpose": "Bannière de mise à jour."
+      },
+      {
+        "name": "drawer",
+        "value": "-12px 0 30px oklch(0.1 0.02 220 / 0.5)",
+        "purpose": "Inspecteur superposé sous 760px uniquement."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "Entrées de panneaux, enfoncement des boutons, interrupteur."
+      },
+      {
+        "name": "state",
+        "value": "120ms ease",
+        "purpose": "Couleurs, fonds et bords au survol et à la sélection."
+      },
+      {
+        "name": "press",
+        "value": "transform 140ms ease-out, scale(0.97)",
+        "purpose": "Enfoncement au clic des boutons et des cases."
+      },
+      {
+        "name": "sweep",
+        "value": "--remaining 220ms linear",
+        "purpose": "Avance du balayage de recharge entre deux relevés ; figé en voile uni en mouvement réduit."
+      },
+      {
+        "name": "entrance",
+        "value": "@starting-style, 140-200ms ease-out",
+        "purpose": "Inspecteur (translateX 10px), menu (scale 0.97), bannière (translateY 8px)."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "transition-duration: 0.01ms",
+        "purpose": "Toutes les transitions neutralisées sous prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "1040px"
+      },
+      {
+        "name": "narrow",
+        "value": "760px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Bouton principal",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Une seule action principale par vue, en blanc os.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"/></svg>Ajouter des sons</button>",
+      "css": ".ds-btn-primary { display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 14px; border-radius:8px; font: 600 14px var(--ui); cursor:pointer; transition: background-color 120ms ease, border-color 120ms ease, transform 140ms cubic-bezier(0.23,1,0.32,1); border:1px solid var(--text); color:var(--ground-deep); background:var(--text); } .ds-btn-primary:hover { background: oklch(0.88 0.015 85); } .ds-btn-primary:focus-visible { outline:2px solid var(--text); outline-offset:2px; } .ds-btn-primary:active { transform: scale(0.97); }"
+    },
+    {
+      "name": "Bouton fantôme",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Action secondaire ; variante danger au texte brique pour supprimer.",
+      "html": "<div style=\"display:flex;gap:8px\"><button class=\"ds-btn-ghost\">Choisir une image</button><button class=\"ds-btn-ghost ds-danger\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12\"/></svg>Supprimer le son</button></div>",
+      "css": ".ds-btn-ghost { display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 14px; border-radius:8px; font: 600 14px var(--ui); cursor:pointer; transition: background-color 120ms ease, border-color 120ms ease, transform 140ms cubic-bezier(0.23,1,0.32,1); border:1px solid var(--line-strong); color:var(--text); background:transparent; } .ds-btn-ghost:hover { background:var(--slot); } .ds-btn-ghost:focus-visible { outline:2px solid var(--text); outline-offset:2px; } .ds-btn-ghost:active { transform: scale(0.97); } .ds-btn-ghost.ds-danger { color:var(--brick-text); } .ds-btn-ghost.ds-danger:hover { border-color:var(--brick); background: oklch(0.52 0.16 32 / 0.22); }"
+    },
+    {
+      "name": "Tout arrêter",
+      "kind": "button",
+      "refersTo": "stop-all",
+      "description": "Discret au repos, rempli de brique seulement quand des sons jouent.",
+      "html": "<div style=\"display:flex;gap:12px;align-items:center\"><button class=\"ds-stop-all\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"6.5\" y=\"6.5\" width=\"11\" height=\"11\" rx=\"1.5\"/></svg>Tout arrêter</button><span class=\"ds-voices\">1 son en cours</span><button class=\"ds-stop-all ds-armed\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"6.5\" y=\"6.5\" width=\"11\" height=\"11\" rx=\"1.5\"/></svg>Tout arrêter</button></div>",
+      "css": ".ds-stop-all { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 11px 0 8px; border:1px solid transparent; border-radius:7px; color:var(--brick-text); background:transparent; font: 600 14px var(--ui); cursor:pointer; transition: background-color 120ms ease; } .ds-stop-all svg { width:16px; height:16px; } .ds-stop-all:hover { border-color:var(--brick); } .ds-stop-all.ds-armed { color:#fff; background:var(--brick); } .ds-stop-all.ds-armed:hover { background:var(--brick-hover); } .ds-stop-all:focus-visible { outline:2px solid var(--text); outline-offset:2px; } .ds-voices { color:var(--amber); font: 600 12.5px var(--ui); }"
+    },
+    {
+      "name": "Champ de recherche",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Champ en fond de puits avec icône et indice de touche gravée.",
+      "html": "<label class=\"ds-search\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"10.5\" cy=\"10.5\" r=\"5.5\"/><path d=\"m15 15 4.5 4.5\"/></svg><input type=\"search\" placeholder=\"Rechercher un son\"><span class=\"ds-hint\">/</span></label>",
+      "css": ".ds-search { position:relative; display:block; width:260px; } .ds-search svg { position:absolute; top:8px; left:9px; color:var(--text-3); } .ds-search input { width:100%; height:34px; padding:0 30px 0 34px; border:1px solid var(--line-strong); border-radius:8px; color:var(--text); background:var(--ground-deep); font: 14px var(--ui); } .ds-search input::placeholder { color:var(--text-3); } .ds-search input:focus-visible { outline:2px solid var(--text); outline-offset:2px; } .ds-hint { position:absolute; top:8px; right:8px; display:grid; width:18px; height:18px; place-items:center; border:1px solid var(--line-strong); border-bottom-width:2px; border-radius:4px; color:var(--text-3); font: 11px/1 var(--ui); }"
+    },
+    {
+      "name": "Rail de navigation",
+      "kind": "nav",
+      "refersTo": "rail-item",
+      "description": "Rail gauche : marque gravée SLB, icône au-dessus d'un libellé court.",
+      "html": "<nav class=\"ds-rail\"><span class=\"ds-brand\">SLB</span><button class=\"ds-rail-item\" aria-current=\"page\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"4\" y=\"4\" width=\"6.5\" height=\"6.5\" rx=\"1.5\"/><rect x=\"13.5\" y=\"4\" width=\"6.5\" height=\"6.5\" rx=\"1.5\"/><rect x=\"4\" y=\"13.5\" width=\"6.5\" height=\"6.5\" rx=\"1.5\"/><rect x=\"13.5\" y=\"13.5\" width=\"6.5\" height=\"6.5\" rx=\"1.5\"/></svg>Sons</button><button class=\"ds-rail-item\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 4.5a2.5 2.5 0 0 1 2.5 2.5v4.5a2.5 2.5 0 0 1-5 0V7A2.5 2.5 0 0 1 12 4.5Z\"/><path d=\"M6.5 11a5.5 5.5 0 0 0 11 0M12 16.5V20\"/></svg>Audio</button></nav>",
+      "css": ".ds-rail { display:flex; flex-direction:column; align-items:center; gap:4px; width:76px; padding:14px 0 10px; border-right:1px solid var(--line); background:var(--rail); } .ds-brand { display:grid; width:46px; height:40px; margin-bottom:16px; place-items:center; border:1px solid var(--line-strong); border-bottom-width:3px; border-radius:8px; background:var(--slot); color:var(--text); font: 700 12px/1 var(--mono); letter-spacing:0.04em; } .ds-rail-item { display:flex; flex-direction:column; align-items:center; gap:4px; width:64px; padding:9px 0 7px; border:0; border-radius:9px; color:var(--text-3); background:transparent; font: 600 11.5px var(--ui); cursor:pointer; transition: color 120ms ease, background-color 120ms ease; } .ds-rail-item svg { width:20px; height:20px; } .ds-rail-item[aria-current=page] { color:var(--text); background:var(--slot); } .ds-rail-item:hover { color:var(--text); background: oklch(0.275 0.028 216 / 0.6); } .ds-rail-item:focus-visible { outline:2px solid var(--text); outline-offset:2px; }"
+    },
+    {
+      "name": "Onglets de soundboard",
+      "kind": "nav",
+      "refersTo": "tab",
+      "description": "Onglets avec compteur mono ; le sélectionné prend le fond case.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">Favoris<span class=\"ds-count\">12</span></button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Valorant<span class=\"ds-count\">3</span></button></div>",
+      "css": ".ds-tabs { display:flex; gap:2px; } .ds-tab { display:inline-flex; align-items:center; gap:7px; height:32px; padding:0 11px; border:0; border-radius:8px; color:var(--text-3); background:transparent; font: 600 14px var(--ui); cursor:pointer; transition: color 120ms ease, background-color 120ms ease; } .ds-tab[aria-selected=true] { color:var(--text); background:var(--slot); } .ds-tab:hover { color:var(--text); } .ds-tab:focus-visible { outline:2px solid var(--text); outline-offset:2px; } .ds-count { color:var(--text-3); font: 500 11.5px var(--mono); }"
+    },
+    {
+      "name": "Pastille d'état",
+      "kind": "chip",
+      "refersTo": "state-chip",
+      "description": "État d'un maillon audio : sauge en ligne, jaune transitoire.",
+      "html": "<div style=\"display:flex;gap:8px\"><span class=\"ds-chip\" data-state=\"ok\"><span class=\"ds-dot\"></span>Micro actif</span><span class=\"ds-chip\" data-state=\"warn\"><span class=\"ds-dot\"></span>Démarrage</span><span class=\"ds-chip\"><span class=\"ds-dot\"></span>Arrêté</span></div>",
+      "css": ".ds-chip { display:inline-flex; align-items:center; gap:7px; height:26px; padding:0 10px; border:1px solid var(--line); border-radius:13px; color:var(--text-2); font: 12.5px var(--ui); } .ds-dot { width:8px; height:8px; border:1.5px solid var(--text-3); border-radius:50%; } .ds-chip[data-state=ok] .ds-dot { border-color:var(--sage); background:var(--sage); } .ds-chip[data-state=warn] .ds-dot { border-color:var(--warn); background:var(--warn); }"
+    },
+    {
+      "name": "Case de son",
+      "kind": "card",
+      "refersTo": "slot",
+      "description": "Signature : case carrée, raccourci gravé, balayage d'ambre « temps de recharge » en lecture.",
+      "html": "<ul class=\"ds-grid\"><li class=\"ds-slot\"><button class=\"ds-face\"><span class=\"ds-key\">Ctrl+Maj+1</span><svg class=\"ds-wave\" viewBox=\"0 0 60 20\"><rect x=\"4\" y=\"6\" width=\"2\" height=\"8\"/><rect x=\"10\" y=\"2\" width=\"2\" height=\"16\"/><rect x=\"16\" y=\"5\" width=\"2\" height=\"10\"/><rect x=\"22\" y=\"8\" width=\"2\" height=\"4\"/><rect x=\"28\" y=\"3\" width=\"2\" height=\"14\"/><rect x=\"34\" y=\"7\" width=\"2\" height=\"6\"/><rect x=\"40\" y=\"4\" width=\"2\" height=\"12\"/><rect x=\"46\" y=\"8\" width=\"2\" height=\"4\"/><rect x=\"52\" y=\"6\" width=\"2\" height=\"8\"/></svg></button><div class=\"ds-meta\"><span class=\"ds-title\">Bruh</span><span class=\"ds-time\">0:01</span></div></li><li class=\"ds-slot\" data-playing><button class=\"ds-face\"><span class=\"ds-sweep\" style=\"--remaining:0.6\"></span><span class=\"ds-key\">Alt+F2</span><svg class=\"ds-wave\" viewBox=\"0 0 60 20\"><rect x=\"4\" y=\"6\" width=\"2\" height=\"8\"/><rect x=\"10\" y=\"2\" width=\"2\" height=\"16\"/><rect x=\"16\" y=\"5\" width=\"2\" height=\"10\"/><rect x=\"22\" y=\"8\" width=\"2\" height=\"4\"/><rect x=\"28\" y=\"3\" width=\"2\" height=\"14\"/><rect x=\"34\" y=\"7\" width=\"2\" height=\"6\"/><rect x=\"40\" y=\"4\" width=\"2\" height=\"12\"/><rect x=\"46\" y=\"8\" width=\"2\" height=\"4\"/><rect x=\"52\" y=\"6\" width=\"2\" height=\"8\"/></svg></button><div class=\"ds-meta\"><span class=\"ds-title\">Victoire royale</span><span class=\"ds-time\">0:07</span></div></li></ul>",
+      "css": ".ds-grid { display:grid; grid-template-columns: repeat(2, 132px); gap:18px 14px; margin:0; padding:0; list-style:none; } .ds-slot { display:grid; gap:7px; } .ds-face { position:relative; display:grid; place-items:center; width:100%; aspect-ratio:1; padding:0; overflow:hidden; border:1px solid var(--line); border-radius:10px; background:var(--slot); color: oklch(0.62 0.03 210); cursor:pointer; transition: border-color 120ms ease, transform 140ms cubic-bezier(0.23,1,0.32,1); } .ds-face::after { position:absolute; inset:0; border:2px solid transparent; border-radius:inherit; content:''; pointer-events:none; } .ds-face:hover { border-color:var(--line-strong); } .ds-face:active { transform:scale(0.97); } .ds-face:focus-visible { outline:2px solid var(--text); outline-offset:2px; } .ds-slot[data-playing] .ds-face, .ds-slot[data-playing] .ds-face::after { border-color:var(--amber); } .ds-wave { position:relative; width:62%; height:26%; fill:currentColor; } .ds-sweep { position:absolute; inset:0; background: conic-gradient(transparent calc((1 - var(--remaining)) * 1turn), var(--amber) 0 calc((1 - var(--remaining)) * 1turn + 1.5deg), var(--amber-veil) 0); } .ds-key { position:absolute; top:7px; left:7px; z-index:1; padding:3px 5px 2px; border:1px solid var(--line-strong); border-bottom-width:2px; border-radius:5px; color:var(--text); background: oklch(0.18 0.02 220 / 0.88); font: 10.5px/1.2 var(--mono); } .ds-meta { display:flex; justify-content:space-between; align-items:baseline; gap:8px; padding:0 2px; } .ds-title { color:var(--text); font: 600 13px var(--ui); } .ds-time { color:var(--text-3); font: 11.5px var(--mono); font-variant-numeric: tabular-nums; } .ds-slot[data-playing] .ds-time { color:var(--amber); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "La barre d'action",
+    "overview": "**Creative North Star: \"La barre d'action\"**\n\nLa bibliothèque se lit comme l'inventaire d'un jeu vidéo : chaque son est une case carrée d'échelle fixe, son raccourci est gravé en haut à gauche comme une touche de sort, et le son en cours se lit comme un temps de recharge. Tout le reste est de l'ardoise bleu-vert : un sol profond, des cases un ton plus clair au filet fin, un texte blanc os. La couleur vive n'existe que pour dire un état : ambre pour ce qui joue, sauge pour ce qui est en ligne, brique pour ce qui arrête ou supprime.\n\nL'interface est dense et calme. Elle vit souvent dans une petite fenêtre à côté d'un jeu (1180×760 par défaut, 920×620 au minimum) et ne doit rien coûter au repos : aucune animation permanente, et l'interrogation du moteur audio ralentit au repos puis s'arrête quand la fenêtre est masquée dans la zone de notification. Le mouvement est réservé aux réponses à une action et aux entrées de panneaux.\n\nLe système refuse la grille de cartes sombres à halo violet, le look gamer RGB et le panneau de configuration gris. Pas de dégradé décoratif, pas de lueur, pas de surtitre.",
+    "keyCharacteristics": [
+      "Sol d'ardoise bleu-vert, cases un ton plus clair, filets de 1px plutôt qu'ombres.",
+      "Trois couleurs d'état, chacune à un seul rôle : ambre (lecture), sauge (en ligne), brique (arrêt et suppression).",
+      "Interface en Segoe UI Variable ; touches, durées, compteurs et pourcentages en Cascadia Mono à chiffres tabulaires.",
+      "Touches gravées : filet inférieur épaissi (2 à 3px) sur les touches, la marque SLB et le champ de raccourci.",
+      "Signature : balayage conique « temps de recharge » proportionnel au temps restant, figé en voile uni en mouvement réduit.",
+      "Icônes SVG maison au trait unique (grille 24px, trait 1.6px arrondi), jamais une police d'icônes ni un glyphe."
+    ],
+    "rules": [
+      {
+        "name": "La règle de l'ambre qui joue",
+        "body": "L'ambre signifie « ce son joue maintenant », rien d'autre. Ni bouton principal, ni lien, ni sélection, ni décor ne le portent.",
+        "section": "colors"
+      },
+      {
+        "name": "La règle de la brique qui arrête",
+        "body": "La brique est réservée à l'arrêt, la coupure, la suppression et l'erreur. « Tout arrêter » ne se remplit qu'en présence de sons en cours ; au repos il reste du texte brique sans fond.",
+        "section": "colors"
+      },
+      {
+        "name": "La règle de la sauge en ligne",
+        "body": "Le vert sauge dit qu'un maillon de la chaîne audio fonctionne. Il ne sert pas de couleur de succès générique ni d'accent.",
+        "section": "colors"
+      },
+      {
+        "name": "La règle de la gravure",
+        "body": "Tout ce qui se tape ou se compte (raccourci, durée, pourcentage, compteur, position « 2 / 12 ») est en Cascadia Mono à chiffres tabulaires, pour que les colonnes de durées s'alignent.",
+        "section": "typography"
+      },
+      {
+        "name": "La règle des polices système",
+        "body": "Seules les polices livrées avec Windows sont permises ; aucune police web n'est chargée.",
+        "section": "typography"
+      },
+      {
+        "name": "La règle du plat par défaut",
+        "body": "Cases, panneaux et contrôles n'ont aucune ombre. Seuls un menu, une bannière ou un tiroir qui recouvrent le contenu en portent une, diffuse et teintée d'ardoise. Jamais de lueur.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** réserver l'ambre à ce qui joue : anneau, balayage, durée en cours, compteur de sons.",
+      "**Do** garder « Tout arrêter » discret au repos et ne le remplir de brique que pendant la lecture.",
+      "**Do** écrire touches, durées, pourcentages et compteurs en Cascadia Mono à chiffres tabulaires.",
+      "**Do** dessiner toute nouvelle icône dans icons.tsx : grille 24px, trait 1.6px arrondi, `currentColor`, sans remplissage.",
+      "**Do** utiliser le filet inférieur épaissi (2-3px) pour tout ce qui se lit comme une touche.",
+      "**Do** suspendre tout relevé ou rafraîchissement quand la fenêtre est masquée, et figer le balayage en mouvement réduit.",
+      "**Do** ouvrir les réglages d'un son dans le panneau latéral plutôt que dans la grille."
+    ],
+    "donts": [
+      "**Don't** ajouter de surtitre ou d'étiquette au-dessus des titres.",
+      "**Don't** utiliser de dégradé décoratif ni de lueur ; le seul dégradé est le balayage conique, qui mesure le temps.",
+      "**Don't** lancer d'animation permanente ou en boucle, ni de rendu coûteux au repos.",
+      "**Don't** utiliser une police d'icônes, des glyphes ou des emoji à la place des SVG maison.",
+      "**Don't** charger une police web ; seules les polices système Windows sont permises.",
+      "**Don't** utiliser la brique pour autre chose qu'arrêter, couper, supprimer ou signaler une erreur.",
+      "**Don't** reproduire le look gamer RGB, le halo violet sur cartes sombres ou le panneau de configuration gris."
+    ]
+  }
+}
