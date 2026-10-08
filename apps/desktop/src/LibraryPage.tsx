@@ -260,6 +260,8 @@ export function LibraryPage({ audio, active }: { audio: AudioStatus; active: boo
   const searchRef = useRef<HTMLInputElement>(null);
   const reducedMotion = useReducedMotion();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const tablistRef = useRef<HTMLDivElement>(null);
+  const [tabsOverflow, setTabsOverflow] = useState(false);
   const reportShortcutError = useCallback((message: string) => setError(message), []);
   useGlobalShortcuts(snapshot.soundboards, reportShortcutError);
 
@@ -422,6 +424,17 @@ export function LibraryPage({ audio, active }: { audio: AudioStatus; active: boo
   }
 
   const toggleInspector = useCallback((sound: Sound) => setInspectedId((current) => current === sound.id ? null : sound.id), []);
+  // A fade on the tab strip's edge tells the user more boards sit past it.
+  useEffect(() => {
+    const list = tablistRef.current;
+    if (!list || typeof ResizeObserver === "undefined") return;
+    const measure = () => setTabsOverflow(list.scrollWidth > list.clientWidth + 1 && list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    list.addEventListener("scroll", measure, { passive: true });
+    measure();
+    return () => { observer.disconnect(); list.removeEventListener("scroll", measure); };
+  }, [snapshot.soundboards.length]);
   const boardIndex = selected ? snapshot.soundboards.findIndex((board) => board.id === selected.id) : -1;
   const hasBoards = snapshot.soundboards.length > 0;
 
@@ -431,7 +444,7 @@ export function LibraryPage({ audio, active }: { audio: AudioStatus; active: boo
       <header className="toolbar">
         <div className="board-tabs">
           {hasBoards && (
-            <div className="tablist" role="tablist" aria-label="Soundboards">
+            <div className="tablist" role="tablist" aria-label="Soundboards" ref={tablistRef} data-overflow={tabsOverflow || undefined} onWheel={(event) => { if (event.deltaY && tablistRef.current) tablistRef.current.scrollLeft += event.deltaY; }}>
               {snapshot.soundboards.map((board, index) => {
                 const active = !trimmedQuery && selected?.id === board.id;
                 return (

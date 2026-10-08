@@ -142,8 +142,10 @@ kbd { font-family: var(--mono); }
 .library.with-inspector { grid-template-columns: minmax(0, 1fr) 320px; }
 .toolbar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
 .board-tabs { display: flex; flex: 1 1 340px; align-items: center; gap: 4px; min-width: 0; }
-.tablist { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-.tablist::-webkit-scrollbar { display: none; }
+.tablist { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.tablist::-webkit-scrollbar { height: 6px; }
+.tablist::-webkit-scrollbar-thumb { border-width: 1px; }
+.tablist[data-overflow] { mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
 .tab { display: inline-flex; flex: none; align-items: center; gap: 7px; height: 32px; padding: 0 11px; border: 0; border-radius: 8px; color: var(--text-3); background: transparent; font-weight: 600; transition: color 120ms ease, background-color 120ms ease; }
 .tab[aria-selected="true"] { color: var(--text); background: var(--slot); }
 .tab-count { color: var(--text-3); font: 500 11.5px var(--mono); }
@@ -180,6 +182,7 @@ kbd { font-family: var(--mono); }
 .slot-art-fallback { display: grid; place-items: center; color: oklch(0.62 0.03 var(--art-hue)); background: oklch(0.255 0.03 var(--art-hue)); box-shadow: inset 0 1px 0 oklch(0.17 0.02 220 / 0.6); }
 .slot-wave { width: 62%; height: 26%; fill: currentColor; }
 .slot-sweep { position: absolute; inset: 0; background: conic-gradient(transparent calc((1 - var(--remaining)) * 1turn), var(--amber) 0 calc((1 - var(--remaining)) * 1turn + 1.5deg), var(--amber-veil) 0); transition: --remaining 220ms linear; pointer-events: none; }
+.slot-sweep.still { background: var(--amber-veil); }
 .slot-key { position: absolute; top: 7px; left: 7px; max-width: calc(100% - 14px); overflow: hidden; padding: 3px 5px 2px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; color: var(--text); background: oklch(0.18 0.02 220 / 0.88); font-size: 10.5px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .slot-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; padding: 0 2px; }
 .slot-title { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -197,14 +200,14 @@ kbd { font-family: var(--mono); }
 .empty p { margin-bottom: 8px; color: var(--text-2); }
 
 /* Inspector */
-.inspector { grid-column: 2; grid-row: 2 / -1; display: flex; flex-direction: column; gap: 22px; min-height: 0; overflow: auto; padding: 14px 18px 24px; border-left: 1px solid var(--line); background: var(--panel); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
+.inspector { grid-column: 2; grid-row: 2 / -1; display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow: auto; padding: 14px 18px 0; border-left: 1px solid var(--line); background: var(--panel); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
 .inspector-head { display: flex; align-items: center; justify-content: space-between; }
 .inspector-head h2 { font-size: 15px; font-weight: 650; }
 .shortcut-row { display: flex; align-items: center; gap: 10px; }
 .keycap-field { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-bottom-width: 3px; border-radius: 8px; background: var(--ground-deep); text-align: left; }
 .keycap-field kbd { display: block; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .keycap-field.capturing { border-color: var(--text); }
-.inspector-actions { display: grid; gap: 10px; margin-top: auto; padding-top: 16px; border-top: 1px solid var(--line); }
+.inspector-actions { position: sticky; bottom: 0; display: grid; gap: 8px; margin-top: auto; padding: 14px 0 16px; border-top: 1px solid var(--line); background: var(--panel); }
 .inspector-actions .ghost-button { justify-content: flex-start; }
 .move-pair { display: flex; align-items: center; justify-content: space-between; color: var(--text-3); font: 12px var(--mono); }
 
