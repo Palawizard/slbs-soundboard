@@ -41,8 +41,9 @@ describe("library interface", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("play_sound", { soundId: "sound-1" }));
   });
 
-  it("creates a soundboard from the library rail", async () => {
+  it("creates a soundboard from the tab bar", async () => {
     render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Nouveau soundboard" }));
     const field = await screen.findByPlaceholderText("Nouveau soundboard");
     fireEvent.change(field, { target: { value: "Jeux" } });
     fireEvent.click(screen.getByRole("button", { name: "Créer le soundboard" }));
@@ -63,6 +64,52 @@ describe("library interface", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("play_sound", { soundId: "sound-1" }));
     unmount();
     await waitFor(() => expect(unregister).toHaveBeenCalledWith(["Ctrl+Shift+K"]));
+  });
+});
+
+describe("finding and stopping sounds", () => {
+  const boards = [
+    { id: "board-1", title: "Favoris", position: 0, sounds: [sound] },
+    { id: "board-2", title: "Jeux", position: 1, sounds: [{ ...sound, id: "sound-2", title: "Clutch", audioHash: "def", playback: { ...sound.playback, keybind: "Alt+2" } }] },
+  ];
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(register).mockReset();
+    vi.mocked(unregister).mockReset();
+    vi.mocked(register).mockResolvedValue();
+    vi.mocked(unregister).mockResolvedValue();
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "library_snapshot") return { soundboards: boards, recoveryNotice: null, activeSoundboardId: "board-1" };
+      if (command === "play_sound") return 60_000;
+      if (command === "list_microphones" || command === "list_output_devices") return [];
+      return undefined;
+    });
+  });
+
+  it("searches every soundboard and plays the first match on Enter", async () => {
+    render(<App />);
+    await screen.findByText("Cloche");
+    const search = screen.getByRole("searchbox", { name: "Rechercher un son" });
+    fireEvent.change(search, { target: { value: "clu" } });
+    expect(await screen.findByText("Clutch")).toBeInTheDocument();
+    expect(screen.queryByText("Cloche")).not.toBeInTheDocument();
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("play_sound", { soundId: "sound-2" }));
+  });
+
+  it("stops every sound from the status strip on any page", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Audio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tout arrêter" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("stop_all_sounds"));
+  });
+
+  it("keeps global shortcuts registered while another page is open", async () => {
+    render(<App />);
+    await waitFor(() => expect(register).toHaveBeenCalledWith(["Alt+2"], expect.any(Function)));
+    fireEvent.click(screen.getByRole("button", { name: "Audio" }));
+    await screen.findByRole("heading", { name: "Audio" });
+    expect(unregister).not.toHaveBeenCalled();
   });
 });
 
