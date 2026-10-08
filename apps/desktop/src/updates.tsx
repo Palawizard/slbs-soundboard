@@ -79,7 +79,7 @@ export function UpdateBanner() {
         </button>
         <button
           type="button"
-          className="secondary-button"
+          className="ghost-button"
           onClick={() => setDismissed(true)}
           disabled={phase === "downloading" || phase === "ready"}
         >
