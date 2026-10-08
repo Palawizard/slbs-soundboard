@@ -33,3 +33,7 @@ apps/desktop/src-tauri/release-resources/
 
 # Updater signing key, never committed
 updater-private-key.txt
+
+# Impeccable review captures (local QA only)
+apps/desktop/.impeccable/review/
+apps/desktop/.impeccable/build/
