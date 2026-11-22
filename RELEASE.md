@@ -8,7 +8,7 @@ $env:SLB_SIGN_CERT_SHA1 = "0123456789ABCDEF0123456789ABCDEF01234567"
 npm run release:windows
 ```
 
-The gate refuses missing or invalid driver signatures. The release MSI uses a stable upgrade code, bundles the driver package, creates or updates `SLB Virtual Microphone` during installation and removes it only on a real uninstall—not during an upgrade. User data under `%APPDATA%\fr.slb.soundboard` is outside the installation directory and is intentionally preserved.
+The gate refuses missing or invalid driver signatures. The release MSI uses a stable upgrade code, bundles the driver package, creates or updates `SLB Virtual Microphone` during installation and removes it only on a real uninstall, not during an upgrade. User data under `%APPDATA%\fr.slb.soundboard` is outside the installation directory and is intentionally preserved.
 
 The driver must pass Microsoft Hardware Lab Kit testing and be signed through the Hardware Developer Program before distribution. An attestation-signed testing package is not accepted as the retail release artifact. Keep certificates and Hardware Dashboard credentials outside the repository.
 
